@@ -53,10 +53,18 @@ OpDef: (String, OpDef) = {
 Op: Op = {
     <lit:Literal> => Op::Literal(lit),
     <name:"lident"> => Op::Name(name.to_owned()),
+    "case" "{" <arms:Comma<CaseArm>> "}" => {
+        let arms = arms.into_iter().collect();
+        Op::Case(arms)
+    },
 };
 
 Literal: Literal = {
     <n:"num"> => Literal::Int(n),
+};
+
+CaseArm: (String, CaseArm) = {
+    <constr:"lident"> "{" <body:Op*> "}" => (constr.to_owned(), CaseArm { body }),
 };
 
 Comma<T>: Vec<T> = {
@@ -80,6 +88,7 @@ extern {
         "uident" => Token::UIdent(<&'input str>),
         "define" => Token::Define,
         "data" => Token::Data,
+        "case" => Token::Case,
         ":" => Token::Colon,
         "," => Token::Comma,
         "[" => Token::BracketOpen,

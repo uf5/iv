@@ -47,7 +47,7 @@ pub enum Body {
 pub enum Op {
     Literal(Literal),
     Name(String),
-    Case(Vec<CaseArm>),
+    Case(HashMap<String, CaseArm>),
 }
 
 #[derive(Debug)]
@@ -57,6 +57,5 @@ pub enum Literal {
 
 #[derive(Debug)]
 pub struct CaseArm {
-    pub constr: String,
     pub body: Vec<Op>,
 }

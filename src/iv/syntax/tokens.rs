@@ -34,6 +34,8 @@ pub enum Token<'source> {
     Define,
     #[token("data")]
     Data,
+    #[token("case")]
+    Case,
 
     #[token(":")]
     Colon,
