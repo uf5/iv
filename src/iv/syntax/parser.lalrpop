@@ -10,7 +10,12 @@ Module: Module = {
     => Module { op_defs: HashMap::new(), data_defs: HashMap::new() },
     <mut p:Module> <nd:DataDef> => {
         let (n, d) = nd;
-        p.data_defs.insert(n.to_owned(), d);
+        p.data_defs.insert(n, d);
+        p
+    },
+    <mut p:Module> <no:OpDef> => {
+        let (n, o) = no;
+        p.op_defs.insert(n, o);
         p
     },
 }
@@ -35,6 +40,23 @@ Type: Type = {
     "[" <pre:Comma<Type>> "]" "[" <post:Comma<Type>> "]" => Type::Op(OpType { pre, post }), 
     #[precedence(level="1")] #[assoc(side="left")]
     <t1:Type> <t2:Type> => Type::App(Box::new(t1), Box::new(t2)),
+};
+
+OpDef: (String, OpDef) = {
+    "define" "[" <pre:Comma<Type>> "]" <name:"lident"> "[" <post:Comma<Type>> "]" ":" <body:Op*> "." => {
+        let ann = OpType { pre, post };
+        let body = Body::Body(body);
+        (name.to_owned(), OpDef { ann, body })
+    },
+};
+
+Op: Op = {
+    <lit:Literal> => Op::Literal(lit),
+    <name:"lident"> => Op::Name(name.to_owned()),
+};
+
+Literal: Literal = {
+    <n:"num"> => Literal::Int(n),
 };
 
 Comma<T>: Vec<T> = {
