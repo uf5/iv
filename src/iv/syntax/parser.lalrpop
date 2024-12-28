@@ -7,18 +7,25 @@ grammar<'input>(input: &'input str);
 pub IV: Module = Module => <>;
 
 Module: Module = {
-    => Module { op_defs: HashMap::new(), data_defs: HashMap::new() },
-    <mut p:Module> <nd:DataDef> => {
+    <ds:Defs> => {
+        let (data_defs, op_defs) = ds;
+        Module::new(data_defs, op_defs)
+    },
+};
+
+Defs: (HashMap<String, DataDef>, HashMap<String, OpDef>) = {
+    => (HashMap::new(), HashMap::new()),
+    <mut ds:Defs> <nd:DataDef> => {
         let (n, d) = nd;
-        p.data_defs.insert(n, d);
-        p
+        ds.0.insert(n, d);
+        ds
     },
-    <mut p:Module> <no:OpDef> => {
+    <mut ds:Defs> <no:OpDef> => {
         let (n, o) = no;
-        p.op_defs.insert(n, o);
-        p
+        ds.1.insert(n, o);
+        ds
     },
-}
+};
 
 DataDef: (String, DataDef) = {
     "data" <name:"uident"> <params:"lident"*> ":" <constrs:Comma<DataConstr>> "." => {

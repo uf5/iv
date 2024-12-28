@@ -6,6 +6,50 @@ pub struct Module {
     pub op_defs: HashMap<String, OpDef>,
 }
 
+impl Module {
+    /// Creates a new module with the constructors of the user defined data types mirrored as op definitions.
+    pub fn new(data_defs: HashMap<String, DataDef>, op_defs: HashMap<String, OpDef>) -> Self {
+        let op_defs = {
+            // user defined ops
+            let op_defs = op_defs.into_iter();
+            // constructors as ops
+            let constr_defs = data_defs.iter().flat_map(
+                |(
+                    data_name,
+                    DataDef {
+                        params: data_params,
+                        constrs,
+                    },
+                )| {
+                    // construct a resulting type from the constructor
+                    let post_type = data_params
+                        .iter()
+                        .fold(Type::Mono(data_name.to_owned()), |lhs, rhs| {
+                            Type::App(Box::new(lhs), Box::new(Type::Poly(rhs.to_owned())))
+                        });
+                    // create op definitions from constructors
+                    constrs
+                        .iter()
+                        .map(move |(constr_name, DataConstr { params })| {
+                            (
+                                constr_name.to_owned(),
+                                OpDef {
+                                    ann: OpType {
+                                        pre: params.clone(),
+                                        post: vec![(&post_type).clone()],
+                                    },
+                                    body: Body::Constructor,
+                                },
+                            )
+                        })
+                },
+            );
+            op_defs.chain(constr_defs).collect()
+        };
+        Module { data_defs, op_defs }
+    }
+}
+
 #[derive(Debug)]
 pub struct DataDef {
     pub params: Vec<String>,
@@ -17,7 +61,7 @@ pub struct DataConstr {
     pub params: Vec<Type>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Type {
     Mono(String),
     Poly(String),
@@ -25,7 +69,7 @@ pub enum Type {
     App(Box<Type>, Box<Type>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpType {
     pub pre: Vec<Type>,
     pub post: Vec<Type>,
