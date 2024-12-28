@@ -1,0 +1,42 @@
+use crate::iv::types::*;
+use super::tokens::*;
+use std::collections::HashMap;
+
+grammar<'input>(input: &'input str);
+
+pub IV: Module = Module => <>;
+
+Module: Module = {
+    => Module { op_defs: HashMap::new(), data_defs: HashMap::new() },
+    <mut p:Module> <nd:DataDef> => {
+        let (n, d) = nd;
+        p.data_defs.insert(n.to_owned(), d);
+        p
+    },
+}
+
+DataDef: (String, DataDef) = {
+    "data" <name:"uident"> "." => (name.to_owned(), DataDef { params: vec![], constructors: HashMap::new() }),
+};
+
+extern {
+    type Location = usize;
+    type Error = LexingError;
+
+    enum Token<'input> {
+        "." => Token::End,
+        "num" => Token::Number(<i32>),
+        "lident" => Token::LIdent(<&'input str>),
+        "uident" => Token::UIdent(<&'input str>),
+        "define" => Token::Define,
+        "data" => Token::Data,
+        ":" => Token::Colon,
+        "," => Token::Comma,
+        "[" => Token::BracketOpen,
+        "]" => Token::BracketClose,
+        "(" => Token::ParenOpen,
+        ")" => Token::ParenClose,
+        "{" => Token::BraceOpen,
+        "}" => Token::BraceClose,
+    }
+}
