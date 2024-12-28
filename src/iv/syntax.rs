@@ -8,9 +8,8 @@ use super::types::Module;
 use lexer::Lexer;
 use parser::IVParser;
 
-// TODO: return either instead of maybe
-pub fn parse(input: &str) -> Option<Module> {
+pub fn parse(input: &str) -> Result<Module, String> {
     let lexer = Lexer::new(input);
     let parser = IVParser::new();
-    parser.parse(input, lexer).ok()
+    parser.parse(input, lexer).map_err(|e| format!("{:?}", e))
 }
