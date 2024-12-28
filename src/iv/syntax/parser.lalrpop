@@ -16,7 +16,35 @@ Module: Module = {
 }
 
 DataDef: (String, DataDef) = {
-    "data" <name:"uident"> "." => (name.to_owned(), DataDef { params: vec![], constructors: HashMap::new() }),
+    "data" <name:"uident"> <params:"lident"*> ":" <constrs:Comma<DataConstr>> "." => {
+        let params = params.into_iter().map(|s| s.to_owned()).collect();
+        let constrs = constrs.into_iter().collect();
+        (name.to_owned(), DataDef { params, constrs })
+    },
+};
+
+DataConstr: (String, DataConstr) = {
+    <name:"lident"> => (name.to_owned(), DataConstr { params: vec![] }),
+    "[" <params:Comma<Type>> "]" <name:"lident"> => (name.to_owned(), DataConstr { params }),
+};
+
+Type: Type = {
+    #[precedence(level="0")]
+    <name:"lident"> => Type::Poly(name.to_owned()),
+    <name:"uident"> => Type::Mono(name.to_owned()),
+    "[" <pre:Comma<Type>> "]" "[" <post:Comma<Type>> "]" => Type::Op(OpType { pre, post }), 
+    #[precedence(level="1")] #[assoc(side="left")]
+    <t1:Type> <t2:Type> => Type::App(Box::new(t1), Box::new(t2)),
+};
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        },
+    },
 };
 
 extern {

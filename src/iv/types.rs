@@ -9,7 +9,7 @@ pub struct Module {
 #[derive(Debug)]
 pub struct DataDef {
     pub params: Vec<String>,
-    pub constructors: HashMap<String, DataConstr>,
+    pub constrs: HashMap<String, DataConstr>,
 }
 
 #[derive(Debug)]
