@@ -5,9 +5,8 @@ use std::collections::HashSet;
 #[derive(Debug)]
 pub enum InferenceError {
     UnificationError(Type, Type),
+    OccursCheckError(String, Type),
     UnknownOp(String),
-    PrefixError,
-    ChainError,
 }
 
 #[derive(Debug)]
@@ -119,5 +118,73 @@ impl Gamma {
             .cloned()
             .collect();
         Schema { vars, t: t.clone() }
+    }
+}
+
+struct Inference<'m> {
+    counter: usize,
+    module: &'m Module,
+}
+
+impl<'m> Inference<'m> {
+    pub fn new(module: &'m Module) -> Self {
+        Inference { counter: 1, module }
+    }
+
+    fn new_var(&mut self) -> Type {
+        let var = format!("gen_{}", self.counter);
+        self.counter += 1;
+        Type::Poly(var)
+    }
+
+    pub fn instantiate(&mut self, scm: &Schema) -> Type {
+        let n_vs_ss: HashMap<_, _> = scm
+            .vars
+            .iter()
+            .map(|v| (v.to_owned(), self.new_var()))
+            .collect();
+        scm.t.apply(&n_vs_ss)
+    }
+
+    pub fn unify(&mut self, t1: &Type, t2: &Type) -> Result<Subs, InferenceError> {
+        match (t1, t2) {
+            (Type::Mono(n1), Type::Mono(n2)) if n1 == n2 => Ok(Subs::new()),
+            (Type::Poly(v1), Type::Poly(v2)) if v1 == v2 => Ok(Subs::new()),
+            (Type::Poly(v), t) | (t, Type::Poly(v)) if t.free_poly().contains(v) => {
+                Err(InferenceError::OccursCheckError(v.clone(), t.clone()))
+            }
+            (Type::Poly(v), t) | (t, Type::Poly(v)) => Ok(Subs::from([(v.clone(), t.clone())])),
+            (
+                Type::Op(OpType {
+                    pre: pre1,
+                    post: post1,
+                }),
+                Type::Op(OpType {
+                    pre: pre2,
+                    post: post2,
+                }),
+            ) => {
+                let s_pre = pre1
+                    .iter()
+                    .zip(pre2.iter())
+                    .try_fold(Subs::new(), |s, (t1, t2)| {
+                        let s1 = self.unify(t1, t2)?;
+                        Ok(compose(s, s1))
+                    })?;
+                post1
+                    .iter()
+                    .zip(post2.iter())
+                    .try_fold(s_pre, |s, (t1, t2)| {
+                        let s1 = self.unify(t1, t2)?;
+                        Ok(compose(s, s1))
+                    })
+            }
+            (Type::App(a1, a2), Type::App(b1, b2)) => {
+                let s1 = self.unify(a1, b1)?;
+                let s2 = self.unify(&a2.apply(&s1), &b2.apply(&s1))?;
+                Ok(compose(s1, s2))
+            }
+            (t1, t2) => Err(InferenceError::UnificationError(t1.clone(), t2.clone())),
+        }
     }
 }
