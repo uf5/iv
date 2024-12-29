@@ -7,6 +7,7 @@ pub enum InferenceError {
     UnificationError(Type, Type),
     OccursCheckError(String, Type),
     UnknownOp(String),
+    ChainError,
 }
 
 #[derive(Debug)]
@@ -137,7 +138,7 @@ impl<'m> Inference<'m> {
         Type::Poly(var)
     }
 
-    pub fn instantiate(&mut self, scm: &Schema) -> Type {
+    fn instantiate(&mut self, scm: &Schema) -> Type {
         let n_vs_ss: HashMap<_, _> = scm
             .vars
             .iter()
@@ -146,7 +147,7 @@ impl<'m> Inference<'m> {
         scm.t.apply(&n_vs_ss)
     }
 
-    pub fn unify(&mut self, t1: &Type, t2: &Type) -> Result<Subs, InferenceError> {
+    fn unify(&mut self, t1: &Type, t2: &Type) -> Result<Subs, InferenceError> {
         match (t1, t2) {
             (Type::Mono(n1), Type::Mono(n2)) if n1 == n2 => Ok(Subs::new()),
             (Type::Poly(v1), Type::Poly(v2)) if v1 == v2 => Ok(Subs::new()),
@@ -164,19 +165,22 @@ impl<'m> Inference<'m> {
                     post: post2,
                 }),
             ) => {
-                let s_pre = pre1
-                    .iter()
-                    .zip(pre2.iter())
-                    .try_fold(Subs::new(), |s, (t1, t2)| {
-                        let s1 = self.unify(t1, t2)?;
-                        Ok(compose(s, s1))
-                    })?;
+                if (pre1.len() != pre2.len()) || (post1.len() != post2.len()) {
+                    return Err(InferenceError::UnificationError(t1.clone(), t2.clone()));
+                }
+                let s_pre =
+                    pre1.iter()
+                        .zip(pre2.iter())
+                        .try_fold(Subs::new(), |s_acc, (t1, t2)| {
+                            let s1 = self.unify(t1, t2)?;
+                            Ok(compose(s_acc, s1))
+                        })?;
                 post1
                     .iter()
                     .zip(post2.iter())
-                    .try_fold(s_pre, |s, (t1, t2)| {
+                    .try_fold(s_pre, |s_acc, (t1, t2)| {
                         let s1 = self.unify(t1, t2)?;
-                        Ok(compose(s, s1))
+                        Ok(compose(s_acc, s1))
                     })
             }
             (Type::App(a1, a2), Type::App(b1, b2)) => {
@@ -185,6 +189,97 @@ impl<'m> Inference<'m> {
                 Ok(compose(s1, s2))
             }
             (t1, t2) => Err(InferenceError::UnificationError(t1.clone(), t2.clone())),
+        }
+    }
+
+    fn infer_literal(&self, lit: &Literal) -> OpType {
+        match lit {
+            Literal::Int(_) => OpType {
+                pre: vec![],
+                post: vec![Type::Mono("Int".to_owned())],
+            },
+        }
+    }
+
+    fn infer_op(&mut self, gamma: &Gamma, op: &Op) -> Result<(Subs, OpType), InferenceError> {
+        match op {
+            Op::Literal(lit) => Ok((Subs::new(), self.infer_literal(lit))),
+            _ => todo!(),
+        }
+    }
+
+    fn overflow_chain(
+        &mut self,
+        t1: &OpType,
+        t2: &OpType,
+    ) -> Result<(Subs, OpType), InferenceError> {
+        let OpType {
+            pre: alpha,
+            post: beta_gamma,
+        } = t1;
+        let OpType {
+            pre: beta,
+            post: delta,
+        } = t2;
+        // ensure that |beta_gamma| >= beta
+        if beta_gamma.len() < beta.len() {
+            return Err(InferenceError::ChainError);
+        }
+        // unify prefixes
+        let s = beta_gamma
+            .iter()
+            .zip(beta.iter())
+            .try_fold(Subs::new(), |s_acc, (t1, t2)| {
+                Ok(compose(s_acc, self.unify(t1, t2)?))
+            })?;
+        // remainder after prefx unification
+        let gamma: Vec<Type> = beta_gamma.iter().skip(beta.len()).cloned().collect();
+        // apply substitutions to the rest of the types
+        let alpha: Vec<Type> = alpha.iter().map(|t| t.apply(&s)).collect();
+        let delta_gamma = delta
+            .iter()
+            .chain(gamma.iter())
+            .map(|t| t.apply(&s))
+            .collect();
+        // return the chained optype
+        Ok((
+            s,
+            OpType {
+                pre: alpha,
+                post: delta_gamma,
+            },
+        ))
+    }
+
+    fn underflow_chain(
+        &mut self,
+        t1: &OpType,
+        t2: &OpType,
+    ) -> Result<(Subs, OpType), InferenceError> {
+        todo!()
+    }
+
+    fn chain(&mut self, t1: &OpType, t2: &OpType) -> Result<(Subs, OpType), InferenceError> {
+        self.overflow_chain(t1, t2)
+    }
+
+    fn infer(&mut self, gamma: &Gamma, ops: &[Op]) -> Result<(Subs, OpType), InferenceError> {
+        match ops {
+            [] => Ok((
+                Subs::new(),
+                OpType {
+                    pre: vec![],
+                    post: vec![],
+                },
+            )),
+            [o, os @ ..] => {
+                let (s1, t1) = self.infer_op(gamma, o)?;
+                let gamma1 = gamma.apply(&s1);
+                let (s2, t2) = self.infer(&gamma1, os)?;
+                let t1 = t1.apply(&s2);
+                let (ss, tt) = self.chain(&t1, &t2)?;
+                Ok((compose(compose(ss, s2), s1), tt))
+            }
         }
     }
 }
