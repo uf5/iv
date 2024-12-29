@@ -61,7 +61,7 @@ pub struct DataConstr {
     pub params: Vec<Type>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Mono(String),
     Poly(String),
@@ -69,10 +69,19 @@ pub enum Type {
     App(Box<Type>, Box<Type>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpType {
     pub pre: Vec<Type>,
     pub post: Vec<Type>,
+}
+
+impl OpType {
+    pub fn empty() -> Self {
+        OpType {
+            pre: vec![],
+            post: vec![],
+        }
+    }
 }
 
 #[derive(Debug)]
