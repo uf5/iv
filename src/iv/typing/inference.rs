@@ -5,7 +5,8 @@ use crate::iv::types::*;
 
 pub enum InferenceError {
     UnificationError(Type, Type),
-    OccursCheckError,
+    OccursCheckError(String, Type),
+    UnknownOp(String),
 }
 
 type Err<T> = Result<T, InferenceError>;
@@ -162,10 +163,87 @@ impl<'m> Inference<'m> {
 
     fn instantiate(&mut self, scm: &Schema<Type>) -> Type {
         let Schema { vars, t } = scm;
-        let new_var_subst: Subst = vars
+        let new_var_subst = vars
             .iter()
             .map(|v| (v.to_owned(), self.gen_name()))
             .collect();
         t.apply(&new_var_subst)
+    }
+
+    fn instantiate_op(&mut self, op: &OpType) -> OpType {
+        let new_var_subst = op
+            .ftv()
+            .iter()
+            .map(|v| (v.to_owned(), self.gen_name()))
+            .collect();
+        op.apply(&new_var_subst)
+    }
+
+    fn unify(&mut self, t1: &Type, t2: &Type) -> Err<Subst> {
+        match (t1, t2) {
+            (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
+            (Type::Mono(_), Type::Mono(_)) => {
+                Err(InferenceError::UnificationError(t1.clone(), t2.clone()))
+            }
+            (Type::Poly(v1), Type::Poly(v2)) if v1 == v2 => Ok(Subst::new()),
+            (Type::Poly(v), t) | (t, Type::Poly(v)) => {
+                if t.ftv().contains(v) {
+                    Err(InferenceError::OccursCheckError(v.clone(), t.clone()))
+                } else {
+                    Ok(Subst::from([(v.clone(), t.clone())]))
+                }
+            }
+            (Type::App(l1, r1), Type::App(l2, r2)) => {
+                let s1 = self.unify(l1, l2)?;
+                let s2 = self.unify(&r1.apply(&s1), &r2.apply(&s1))?;
+                Ok(compose(&s1, &s2))
+            }
+            (Type::Op(_o1), Type::Op(_o2)) => todo!(),
+            (_, _) => Err(InferenceError::UnificationError(t1.clone(), t2.clone())),
+        }
+    }
+
+    fn ti_lit(&self, lit: &Literal) -> OpType {
+        let lit_type = match lit {
+            Literal::Int(_) => Type::Mono("Int".to_owned()),
+        };
+        OpType {
+            pre: vec![],
+            post: vec![lit_type],
+        }
+    }
+
+    fn ti_op(&mut self, e: &TypeEnv, op: &Op) -> Err<(Subst, OpType)> {
+        match op {
+            Op::Literal(lit) => Ok((Subst::new(), self.ti_lit(lit))),
+            Op::Name(n) => {
+                let op_def = self
+                    .module
+                    .op_defs
+                    .get(n)
+                    .ok_or_else(|| InferenceError::UnknownOp(n.clone()))?;
+                Ok((Subst::new(), self.instantiate_op(&op_def.ann)))
+            }
+            Op::Case(hash_map) => todo!(),
+        }
+    }
+
+    fn overflow_chain(&mut self, t1: &OpType, t2: &OpType) -> Err<(Subst, OpType)> {
+        todo!()
+    }
+
+    fn ti(&mut self, e: &TypeEnv, ops: &[Op]) -> Err<(Subst, OpType)> {
+        match ops {
+            [] => Ok((Subst::new(), OpType::empty())),
+            [o, os @ ..] => {
+                let (s1, t1) = self.ti_op(e, o)?;
+                let e1 = e.apply(&s1);
+                let (s2, t2) = self.ti(&e1, os)?;
+                let (s3, t3) = self.overflow_chain(&t1, &t2)?;
+                let s = compose(&s3, &compose(&s2, &s1));
+                let t = t3.apply(&s);
+                Ok((s, t))
+            }
+        }
     }
 }
