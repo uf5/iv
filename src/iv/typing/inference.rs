@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::iter::zip;
 
 use crate::iv::types::*;
 
+#[derive(Debug)]
 pub enum InferenceError {
     UnificationError(Type, Type),
     OccursCheckError(String, Type),
@@ -151,8 +153,19 @@ impl<'m> Inference<'m> {
         Inference { module, counter: 0 }
     }
 
-    pub fn infer() -> Err<()> {
-        todo!()
+    pub fn infer(&mut self) -> Err<()> {
+        for (op_name, op_def) in self.module.op_defs.iter() {
+            if op_name.starts_with("noc") {
+                continue;
+            }
+            let Body::Body(ref body) = op_def.body else {
+                continue;
+            };
+            let e = TypeEnv::new();
+            let (_, inferred) = self.ti(&e, &body)?;
+            println!("{}; ann: {:?}; inf: {:?}", op_name, op_def.ann, inferred);
+        }
+        Ok(())
     }
 
     fn gen_name(&mut self) -> Type {
@@ -228,8 +241,31 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn overflow_chain(&mut self, t1: &OpType, t2: &OpType) -> Err<(Subst, OpType)> {
-        todo!()
+    fn overflow_chain(&mut self, ot1: &OpType, ot2: &OpType) -> Err<(Subst, OpType)> {
+        let OpType {
+            pre: alpha,
+            post: beta_gamma,
+        } = ot1;
+        let OpType {
+            pre: beta,
+            post: delta,
+        } = ot2;
+        let s = zip(beta_gamma.iter(), beta.iter()).try_fold(Subst::new(), |acc, (t1, t2)| {
+            self.unify(&t1.apply(&acc), &t2.apply(&acc))
+        })?;
+        let alpha_applied = alpha.iter().map(|t| t.apply(&s)).collect();
+        let delta_gamma_applied = delta
+            .iter()
+            .chain(beta_gamma.iter().skip(beta.len()))
+            .map(|t| t.apply(&s))
+            .collect();
+        Ok((
+            s,
+            OpType {
+                pre: alpha_applied,
+                post: delta_gamma_applied,
+            },
+        ))
     }
 
     fn ti(&mut self, e: &TypeEnv, ops: &[Op]) -> Err<(Subst, OpType)> {
