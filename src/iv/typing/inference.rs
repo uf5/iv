@@ -242,64 +242,60 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn overflow_chain(&mut self, ot1: &OpType, ot2: &OpType) -> Err<(Subst, OpType)> {
-        let OpType {
-            pre: alpha,
-            post: beta_gamma,
-        } = ot1;
-        let OpType {
-            pre: beta,
-            post: delta,
-        } = ot2;
-        if beta_gamma.len() < beta.len() {
-            return Err(InferenceError::ChainError);
+    fn chain(&mut self, ot1: &OpType, ot2: &OpType) -> Err<(Subst, OpType)> {
+        if ot1.post.len() < ot2.pre.len() {
+            let OpType {
+                pre: alpha,
+                post: beta,
+            } = ot1;
+            let OpType {
+                pre: beta_gamma,
+                post: delta,
+            } = ot2;
+            let s = zip(beta_gamma.iter(), beta.iter())
+                .try_fold(Subst::new(), |acc, (t1, t2)| {
+                    self.unify(&t1.apply(&acc), &t2.apply(&acc))
+                })?;
+            let alpha_gamma_applied = alpha
+                .iter()
+                .chain(beta_gamma.iter().skip(beta.len()))
+                .map(|t| t.apply(&s))
+                .collect();
+            let delta_applied = delta.iter().map(|t| t.apply(&s)).collect();
+            Ok((
+                s,
+                OpType {
+                    pre: alpha_gamma_applied,
+                    post: delta_applied,
+                },
+            ))
+        } else {
+            let OpType {
+                pre: alpha,
+                post: beta_gamma,
+            } = ot1;
+            let OpType {
+                pre: beta,
+                post: delta,
+            } = ot2;
+            let s = zip(beta_gamma.iter(), beta.iter())
+                .try_fold(Subst::new(), |acc, (t1, t2)| {
+                    self.unify(&t1.apply(&acc), &t2.apply(&acc))
+                })?;
+            let alpha_applied = alpha.iter().map(|t| t.apply(&s)).collect();
+            let delta_gamma_applied = delta
+                .iter()
+                .chain(beta_gamma.iter().skip(beta.len()))
+                .map(|t| t.apply(&s))
+                .collect();
+            Ok((
+                s,
+                OpType {
+                    pre: alpha_applied,
+                    post: delta_gamma_applied,
+                },
+            ))
         }
-        let s = zip(beta_gamma.iter(), beta.iter()).try_fold(Subst::new(), |acc, (t1, t2)| {
-            self.unify(&t1.apply(&acc), &t2.apply(&acc))
-        })?;
-        let alpha_applied = alpha.iter().map(|t| t.apply(&s)).collect();
-        let delta_gamma_applied = delta
-            .iter()
-            .chain(beta_gamma.iter().skip(beta.len()))
-            .map(|t| t.apply(&s))
-            .collect();
-        Ok((
-            s,
-            OpType {
-                pre: alpha_applied,
-                post: delta_gamma_applied,
-            },
-        ))
-    }
-
-    fn underflow_chain(&mut self, ot1: &OpType, ot2: &OpType) -> Err<(Subst, OpType)> {
-        let OpType {
-            pre: alpha,
-            post: beta,
-        } = ot1;
-        let OpType {
-            pre: beta_gamma,
-            post: delta,
-        } = ot2;
-        if beta_gamma.len() < beta.len() {
-            return Err(InferenceError::ChainError);
-        }
-        let s = zip(beta_gamma.iter(), beta.iter()).try_fold(Subst::new(), |acc, (t1, t2)| {
-            self.unify(&t1.apply(&acc), &t2.apply(&acc))
-        })?;
-        let alpha_gamma_applied = alpha
-            .iter()
-            .chain(beta_gamma.iter().skip(beta.len()))
-            .map(|t| t.apply(&s))
-            .collect();
-        let delta_applied = delta.iter().map(|t| t.apply(&s)).collect();
-        Ok((
-            s,
-            OpType {
-                pre: alpha_gamma_applied,
-                post: delta_applied,
-            },
-        ))
     }
 
     fn ti(&mut self, e: &TypeEnv, ops: &[Op]) -> Err<(Subst, OpType)> {
@@ -309,9 +305,7 @@ impl<'m> Inference<'m> {
                 let (s1, t1) = self.ti_op(e, o)?;
                 let e1 = e.apply(&s1);
                 let (s2, t2) = self.ti(&e1, os)?;
-                let (s3, t3) = self
-                    .overflow_chain(&t1, &t2)
-                    .or(self.underflow_chain(&t1, &t2))?;
+                let (s3, t3) = self.chain(&t1, &t2)?;
                 let s = compose(&s3, &compose(&s2, &s1));
                 let t = t3.apply(&s);
                 Ok((s, t))
