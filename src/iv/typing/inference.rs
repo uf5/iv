@@ -6,6 +6,7 @@ use crate::iv::types::*;
 
 #[derive(Debug)]
 pub enum InferenceError {
+    AnnInfConflict(OpType, OpType),
     UnificationError(Type, Type),
     OccursCheckError(String, Type),
     UnknownOp(String),
@@ -163,8 +164,19 @@ impl<'m> Inference<'m> {
                 continue;
             };
             let e = TypeEnv::new();
-            let (_, inferred) = self.ti(&e, &body)?;
-            println!("{}; ann: {:?}; inf: {:?}", op_name, op_def.ann, inferred);
+            let (_, inf) = self.ti(&e, &body)?;
+            let s = self.unify_op(&op_def.ann, &inf)?;
+            println!("OAMI:\nann:{:?}\ninf:{:?}\nsub:{:?}", &op_def.ann, &inf, &s);
+            // let us assume that the ann matches the inf when all subs values are poly
+            for v in op_def.ann.ftv().iter().filter_map(|t| s.get(t)) {
+                match v {
+                    Type::Poly(_) => (),
+                    _ => Err(InferenceError::AnnInfConflict(
+                        op_def.ann.clone(),
+                        inf.clone(),
+                    ))?,
+                }
+            }
         }
         Ok(())
     }
@@ -212,9 +224,38 @@ impl<'m> Inference<'m> {
                 let s2 = self.unify(&r1.apply(&s1), &r2.apply(&s1))?;
                 Ok(compose(&s1, &s2))
             }
-            (Type::Op(_o1), Type::Op(_o2)) => todo!(),
+            (Type::Op(o1), Type::Op(o2)) => self.unify_op(o1, o2),
             (_, _) => Err(InferenceError::UnificationError(t1.clone(), t2.clone())),
         }
+    }
+
+    fn unify_op(&mut self, o1: &OpType, o2: &OpType) -> Err<Subst> {
+        let OpType {
+            pre: pre1,
+            post: post1,
+        } = o1;
+        let OpType {
+            pre: pre2,
+            post: post2,
+        } = o2;
+        // ensure that the two types have the same size of pre and post stacks
+        if pre1.len() != pre2.len() || post1.len() != post2.len() {
+            return Err(InferenceError::UnificationError(
+                Type::Op(o1.clone()),
+                Type::Op(o2.clone()),
+            ));
+        }
+        // unify stacks
+        zip(
+            pre1.iter().chain(post1.iter()),
+            pre2.iter().chain(post2.iter()),
+        )
+        .try_fold(Subst::new(), |acc, (t1, t2)| {
+            Ok(compose(
+                &acc,
+                &self.unify(&t1.apply(&acc), &t2.apply(&acc))?,
+            ))
+        })
     }
 
     fn ti_lit(&self, lit: &Literal) -> OpType {
@@ -252,9 +293,12 @@ impl<'m> Inference<'m> {
                 pre: beta_gamma,
                 post: delta,
             } = ot2;
-            let s = zip(beta_gamma.iter(), beta.iter())
-                .try_fold(Subst::new(), |acc, (t1, t2)| {
-                    self.unify(&t1.apply(&acc), &t2.apply(&acc))
+            let s =
+                zip(beta_gamma.iter(), beta.iter()).try_fold(Subst::new(), |acc, (t1, t2)| {
+                    Ok(compose(
+                        &acc,
+                        &self.unify(&t1.apply(&acc), &t2.apply(&acc))?,
+                    ))
                 })?;
             let alpha_gamma_applied = alpha
                 .iter()
@@ -278,9 +322,12 @@ impl<'m> Inference<'m> {
                 pre: beta,
                 post: delta,
             } = ot2;
-            let s = zip(beta_gamma.iter(), beta.iter())
-                .try_fold(Subst::new(), |acc, (t1, t2)| {
-                    self.unify(&t1.apply(&acc), &t2.apply(&acc))
+            let s =
+                zip(beta_gamma.iter(), beta.iter()).try_fold(Subst::new(), |acc, (t1, t2)| {
+                    Ok(compose(
+                        &acc,
+                        &self.unify(&t1.apply(&acc), &t2.apply(&acc))?,
+                    ))
                 })?;
             let alpha_applied = alpha.iter().map(|t| t.apply(&s)).collect();
             let delta_gamma_applied = delta
