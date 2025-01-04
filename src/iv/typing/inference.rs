@@ -138,7 +138,7 @@ impl<'m> Inference<'m> {
             (Type::App(l1, r1), Type::App(l2, r2)) => {
                 let s1 = self.unify(l1, l2)?;
                 let s2 = self.unify(&r1.apply(&s1), &r2.apply(&s1))?;
-                Ok(compose(&s1, &s2))
+                Ok(compose(&s2, &s1))
             }
             (Type::Op(o1), Type::Op(o2)) => self.unify_op(o1, o2),
             (_, _) => Err(InferenceError::UnificationError(t1.clone(), t2.clone())),
@@ -150,8 +150,8 @@ impl<'m> Inference<'m> {
     fn unify_list(&mut self, s: Subst, l1: &[Type], l2: &[Type]) -> Err<Subst> {
         zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
             Ok(compose(
-                &s_acc,
                 &self.unify(&t1.apply(&s_acc), &t2.apply(&s_acc))?,
+                &s_acc,
             ))
         })
     }
@@ -264,5 +264,94 @@ impl<'m> Inference<'m> {
                 Ok((s, t))
             }
         }
+    }
+}
+
+/// Test suite designed around the "noc" nocheck prefix. That allows creating different scenarios
+/// in the inference process.
+#[cfg(test)]
+mod noc_tests {
+    use crate::iv::syntax::parse;
+    use crate::iv::typing::inference::*;
+
+    #[test]
+    fn sanity() {
+        let input = "define [a, a] nocadd [a]: 1 2 3.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_ok());
+    }
+
+    #[test]
+    fn subst_int_ann_vs_inf() {
+        let input = "data Alpha:. define [a, a] nocadd [a]:.
+        define [Alpha, Alpha] intadd [Alpha]: nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_ok());
+    }
+
+    #[test]
+    fn ann_ss_pre() {
+        let input = "data Alpha:. define [a, a] nocadd [a]:.
+        define [a, Alpha] intadd [Alpha]: nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_err());
+    }
+
+    #[test]
+    fn ann_ss_post() {
+        let input = "data Alpha:. define [a, a] nocadd [a]:.
+        define [Alpha, a] intadd [Alpha]: nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_err());
+    }
+
+    #[test]
+    fn ann_ss_double() {
+        let input = "data Alpha:. define [a, a] nocadd [a]:.
+        define [a, a] intadd [Alpha]: nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_err());
+    }
+
+    #[test]
+    fn ann_ss_trans_stack() {
+        let input = "data Alpha:. data Beta:. define [a] nocdup [a, a]:.
+        define [Alpha] intadd [Beta, Beta]: nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_err());
+    }
+
+    #[test]
+    fn ann_ss_trans_stack_ok() {
+        let input = "data Alpha:. data Beta:. data Gamma:. define [a, b, c] nocfoobar [c, b, a]:.
+        define [Alpha, Beta, Gamma] intadd [Gamma, Beta, Apha]: nocfoobar.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_err());
+    }
+
+    #[test]
+    fn int_add_uf_chain() {
+        let input = "data Alpha: alpha. define [a, a] nocadd [a]:.
+        define [Alpha] alphainc [Alpha]: alpha nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_ok());
+    }
+
+    #[test]
+    fn int_add_datapoly() {
+        let input = "data Alpha: alpha.
+        data Either a b: [a] left, [b] right.
+        define [] inteithertest [Either Alpha b]: alpha left.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_ok());
+    }
+
+    #[test]
+    fn int_add_datapoly_err() {
+        let input = "data Alpha: alpha.
+        data Either a b: [a] left, [b] right.
+        define [] inteithertest [Either a Alpha]: alpha left.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_err());
     }
 }
