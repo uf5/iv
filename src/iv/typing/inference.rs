@@ -92,8 +92,7 @@ impl<'m> Inference<'m> {
             };
             let (_, inf) = self.ti(&body)?;
             let s = self.unify_op(&op_def.ann, &inf)?;
-            println!("OAMI:\nann:{:?}\ninf:{:?}\nsub:{:?}", &op_def.ann, &inf, &s);
-            // let us assume that the ann matches the inf when all subs values are poly
+            // ann matches the inf when all subs values are poly
             for v in op_def.ann.ftv().iter().filter_map(|t| s.get(t)) {
                 match v {
                     Type::Poly(_) => (),
@@ -146,6 +145,17 @@ impl<'m> Inference<'m> {
         }
     }
 
+    /// Performs unification on two slices.
+    /// Performs min(l1.len(), l2.len()) unifications.
+    fn unify_list(&mut self, s: Subst, l1: &[Type], l2: &[Type]) -> Err<Subst> {
+        zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
+            Ok(compose(
+                &s_acc,
+                &self.unify(&t1.apply(&s_acc), &t2.apply(&s_acc))?,
+            ))
+        })
+    }
+
     fn unify_op(&mut self, o1: &OpType, o2: &OpType) -> Err<Subst> {
         let OpType {
             pre: pre1,
@@ -163,16 +173,8 @@ impl<'m> Inference<'m> {
             ));
         }
         // unify stacks
-        zip(
-            pre1.iter().chain(post1.iter()),
-            pre2.iter().chain(post2.iter()),
-        )
-        .try_fold(Subst::new(), |acc, (t1, t2)| {
-            Ok(compose(
-                &acc,
-                &self.unify(&t1.apply(&acc), &t2.apply(&acc))?,
-            ))
-        })
+        let s1 = self.unify_list(Subst::new(), pre1, pre2)?;
+        self.unify_list(s1, post1, post2)
     }
 
     fn ti_lit(&self, lit: &Literal) -> OpType {
@@ -201,7 +203,7 @@ impl<'m> Inference<'m> {
     }
 
     fn chain(&mut self, ot1: &OpType, ot2: &OpType) -> Err<(Subst, OpType)> {
-        if ot1.post.len() < ot2.pre.len() {
+        if ot1.post.len() <= ot2.pre.len() {
             let OpType {
                 pre: alpha,
                 post: beta,
@@ -210,13 +212,7 @@ impl<'m> Inference<'m> {
                 pre: beta_gamma,
                 post: delta,
             } = ot2;
-            let s =
-                zip(beta_gamma.iter(), beta.iter()).try_fold(Subst::new(), |acc, (t1, t2)| {
-                    Ok(compose(
-                        &acc,
-                        &self.unify(&t1.apply(&acc), &t2.apply(&acc))?,
-                    ))
-                })?;
+            let s = self.unify_list(Subst::new(), beta_gamma, beta)?;
             let alpha_gamma_applied = alpha
                 .iter()
                 .chain(beta_gamma.iter().skip(beta.len()))
@@ -239,13 +235,7 @@ impl<'m> Inference<'m> {
                 pre: beta,
                 post: delta,
             } = ot2;
-            let s =
-                zip(beta_gamma.iter(), beta.iter()).try_fold(Subst::new(), |acc, (t1, t2)| {
-                    Ok(compose(
-                        &acc,
-                        &self.unify(&t1.apply(&acc), &t2.apply(&acc))?,
-                    ))
-                })?;
+            let s = self.unify_list(Subst::new(), beta_gamma, beta)?;
             let alpha_applied = alpha.iter().map(|t| t.apply(&s)).collect();
             let delta_gamma_applied = delta
                 .iter()
