@@ -82,7 +82,8 @@ impl<'m> Inference<'m> {
         Inference { module, counter: 0 }
     }
 
-    pub fn infer(&mut self) -> Err<()> {
+    pub fn infer(&mut self) -> Err<HashMap<String, OpType>> {
+        let mut inferred_map = HashMap::new();
         for (op_name, op_def) in self.module.op_defs.iter() {
             if op_name.starts_with("noc") {
                 continue;
@@ -102,8 +103,9 @@ impl<'m> Inference<'m> {
                     ))?,
                 }
             }
+            inferred_map.insert(op_name.clone(), inf.clone());
         }
-        Ok(())
+        Ok(inferred_map)
     }
 
     fn gen_name(&mut self) -> Type {
@@ -121,6 +123,7 @@ impl<'m> Inference<'m> {
         op.apply(&new_var_subst)
     }
 
+    /// Unify two types. t1 has priority over t2, i.e., (Poly(v), t) is picked over (t, Poly(v)).
     fn unify(&mut self, t1: &Type, t2: &Type) -> Err<Subst> {
         match (t1, t2) {
             (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
