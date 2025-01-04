@@ -205,53 +205,37 @@ impl<'m> Inference<'m> {
         }
     }
 
+    /// Chain two operator types through unification. This includes overflow and underflow chain.
     fn chain(&mut self, ot1: &OpType, ot2: &OpType) -> Err<(Subst, OpType)> {
-        if ot1.post.len() <= ot2.pre.len() {
-            let OpType {
-                pre: alpha,
-                post: beta,
-            } = ot1;
-            let OpType {
-                pre: beta_gamma,
-                post: delta,
-            } = ot2;
-            let s = self.unify_list(Subst::new(), beta_gamma, beta)?;
-            let alpha_gamma_applied = alpha
+        let OpType {
+            pre: alpha,
+            post: beta,
+        } = ot1;
+        let OpType {
+            pre: gamma,
+            post: delta,
+        } = ot2;
+        let s = self.unify_list(Subst::new(), &beta, &gamma)?;
+        if beta.len() >= gamma.len() {
+            // overflow chain
+            let beta_skip_gamma = beta.iter().skip(gamma.len());
+            let pre = alpha.iter().map(|t| t.apply(&s)).collect();
+            let post = delta
                 .iter()
-                .chain(beta_gamma.iter().skip(beta.len()))
+                .chain(beta_skip_gamma)
                 .map(|t| t.apply(&s))
                 .collect();
-            let delta_applied = delta.iter().map(|t| t.apply(&s)).collect();
-            Ok((
-                s,
-                OpType {
-                    pre: alpha_gamma_applied,
-                    post: delta_applied,
-                },
-            ))
+            Ok((s, OpType { pre, post }))
         } else {
-            let OpType {
-                pre: alpha,
-                post: beta_gamma,
-            } = ot1;
-            let OpType {
-                pre: beta,
-                post: delta,
-            } = ot2;
-            let s = self.unify_list(Subst::new(), beta_gamma, beta)?;
-            let alpha_applied = alpha.iter().map(|t| t.apply(&s)).collect();
-            let delta_gamma_applied = delta
+            // underflow chain
+            let gamma_skip_beta = gamma.iter().skip(beta.len());
+            let pre = alpha
                 .iter()
-                .chain(beta_gamma.iter().skip(beta.len()))
+                .chain(gamma_skip_beta)
                 .map(|t| t.apply(&s))
                 .collect();
-            Ok((
-                s,
-                OpType {
-                    pre: alpha_applied,
-                    post: delta_gamma_applied,
-                },
-            ))
+            let post = delta.iter().map(|t| t.apply(&s)).collect();
+            Ok((s, OpType { pre, post }))
         }
     }
 
