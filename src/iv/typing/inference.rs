@@ -330,6 +330,57 @@ mod noc_tests {
     }
 
     #[test]
+    fn uf_triple_add_ok() {
+        let input = "define [a, a] nocadd [a]:.
+        define [a, a, a] tripleadd [a]: nocadd nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_ok());
+    }
+
+    #[test]
+    fn uf_triple_add_ok_spec() {
+        let input = "data Alpha:. data Beta:. define [a, a] nocadd [a]:.
+        define [Alpha, Alpha, Alpha] tripleadd [Alpha]: nocadd nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_ok());
+    }
+
+    #[test]
+    fn uf_triple_add_ok_err1() {
+        let input = "data Alpha:. data Beta:. define [a, a] nocadd [a]:.
+        define [Alpha, Alpha, Alpha] tripleadd [a]: nocadd nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_err());
+    }
+
+    #[test]
+    fn uf_triple_add_ok_err2() {
+        let input = "data Alpha:. data Beta:. define [a, a] nocadd [a]:.
+        define [Alpha, Alpha, Beta] tripleadd [Alpha]: nocadd nocadd.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_err());
+    }
+
+    #[test]
+    fn of_triple1() {
+        let input = "data Alpha:. data Beta:.
+        define [a] nocdup [a, a]:.
+        define [a] tripledup [a, a, a]: nocdup nocdup.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_ok());
+    }
+
+    #[test]
+    fn op_triple2() {
+        let input = "data Alpha:. data Beta:.
+        define [a, a] nocadd [a]:.
+        define [a] nocdup [a, a]:.
+        define [a] tripledup [a, a, a]: nocdup nocdup nocadd nocdup.";
+        let module = parse(&input).unwrap();
+        assert!(Inference::new(&module).infer().is_ok());
+    }
+
+    #[test]
     fn int_add_uf_chain() {
         let input = "data Alpha: alpha. define [a, a] nocadd [a]:.
         define [Alpha] alphainc [Alpha]: alpha nocadd.";
