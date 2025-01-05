@@ -11,6 +11,10 @@ pub enum InferenceError {
     OccursCheckError(String, Type),
     UnknownOp(String),
     ChainError,
+    UnknownConstructor(String),
+    NotAConstructor(String),
+    DuplicateConstructor,
+    NotAllConstructorsCovered,
 }
 
 type Err<T> = Result<T, InferenceError>;
@@ -201,7 +205,42 @@ impl<'m> Inference<'m> {
                     .ok_or_else(|| InferenceError::UnknownOp(n.clone()))?;
                 Ok((Subst::new(), self.instantiate_op(&op_def.ann)))
             }
-            Op::Case(_arms) => todo!(),
+            Op::Case(head_arm, arms) => {
+                // find the matched object type by looking up the head arm constructor op post type
+                let head_constructor =
+                    self.module.op_defs.get(&head_arm.constr).ok_or_else(|| {
+                        InferenceError::UnknownConstructor(head_arm.constr.to_owned())
+                    })?;
+                let Body::Constructor(data_name) = &head_constructor.body else {
+                    return Err(InferenceError::NotAConstructor(head_arm.constr.to_owned()));
+                };
+                let Some(matched_data_def) = self.module.data_defs.get(data_name) else {
+                    unreachable!()
+                };
+                // ensure all constructors are covered exactly once
+                let all_constrs: HashSet<_> = matched_data_def.constrs.keys().collect();
+                let mut used_constrs = HashSet::new();
+                used_constrs.insert(&head_arm.constr);
+                for arm in arms {
+                    if !used_constrs.insert(&arm.constr) {
+                        return Err(InferenceError::DuplicateConstructor);
+                    }
+                }
+                if used_constrs.len() != all_constrs.len() {
+                    return Err(InferenceError::NotAllConstructorsCovered);
+                }
+                // infer the type of the first match arm
+                let (head_s, head_optype) = self.ti(&head_arm.body)?;
+                // chain it with the matched type constructor with pre and post fields flipped
+                let flipped_constructor = OpType {
+                    pre: head_constructor.ann.post.clone(),
+                    post: head_constructor.ann.pre.clone(),
+                };
+                let (chain_s, arm_reference_optype) =
+                    self.chain(&flipped_constructor, &head_optype)?;
+                let s = compose(&chain_s, &head_s);
+                Ok((s, arm_reference_optype))
+            }
         }
     }
 

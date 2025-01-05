@@ -38,7 +38,7 @@ impl Module {
                                         pre: params.clone(),
                                         post: vec![(&post_type).clone()],
                                     },
-                                    body: Body::Constructor,
+                                    body: Body::Constructor(data_name.to_owned()),
                                 },
                             )
                         })
@@ -93,14 +93,14 @@ pub struct OpDef {
 #[derive(Debug)]
 pub enum Body {
     Body(Vec<Op>),
-    Constructor,
+    Constructor(String),
 }
 
 #[derive(Debug)]
 pub enum Op {
     Literal(Literal),
     Name(String),
-    Case(HashMap<String, CaseArm>),
+    Case(CaseArm, Vec<CaseArm>),
 }
 
 #[derive(Debug)]
@@ -110,5 +110,6 @@ pub enum Literal {
 
 #[derive(Debug)]
 pub struct CaseArm {
+    pub constr: String,
     pub body: Vec<Op>,
 }
