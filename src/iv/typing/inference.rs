@@ -231,13 +231,15 @@ impl<'m> Inference<'m> {
                 }
                 // infer the type of the first match arm
                 let (head_s, head_optype) = self.ti(&head_arm.body)?;
+                println!("head_s: {:?}; head_optype: {:?}", head_s, head_optype);
                 // chain it with the matched type constructor with pre and post fields flipped
                 let flipped_constructor = OpType {
                     pre: head_constructor.ann.post.clone(),
                     post: head_constructor.ann.pre.clone(),
                 };
+                let inst_flipped_constructor = self.instantiate_op(&flipped_constructor);
                 let (chain_s, arm_reference_optype) =
-                    self.chain(&flipped_constructor, &head_optype)?;
+                    self.chain(&inst_flipped_constructor, &head_optype)?;
                 let s = compose(&chain_s, &head_s);
                 Ok((s, arm_reference_optype))
             }
@@ -430,5 +432,16 @@ mod noc_tests {
         define [] inteithertest [Either a Alpha]: alpha left.";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
+    }
+
+    #[test]
+    fn case_maybe_nat() {
+        let input = "data Nat: zero, [Nat] suc.
+        data Maybe a: nothing, [a] just.
+        define [Maybe Nat] incnatmaybe [Maybe Nat]: case { just { suc just }, nothing { nothing } }.";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
     }
 }
