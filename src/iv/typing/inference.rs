@@ -15,6 +15,7 @@ pub enum InferenceError {
     NotAConstructor(String),
     DuplicateConstructor,
     NotAllConstructorsCovered,
+    DifferentData(String),
 }
 
 type Err<T> = Result<T, InferenceError>;
@@ -194,6 +195,29 @@ impl<'m> Inference<'m> {
         }
     }
 
+    fn ti_case_arm<'a>(&'a mut self, arm: &CaseArm) -> Err<(&'a DataDef, Subst, OpType)> {
+        let constr = self
+            .module
+            .op_defs
+            .get(&arm.constr)
+            .ok_or_else(|| InferenceError::UnknownConstructor(arm.constr.to_owned()))?;
+        let Body::Constructor(data_name) = &constr.body else {
+            return Err(InferenceError::NotAConstructor(arm.constr.clone()));
+        };
+        let Some(data_def) = self.module.data_defs.get(data_name) else {
+            unreachable!();
+        };
+        let destr_op_type = OpType {
+            pre: constr.ann.post.clone(),
+            post: constr.ann.pre.clone(),
+        };
+        let (s1, body_optype) = self.ti(&arm.body)?;
+        let arm_body_post_destr_instantiated = self.instantiate_op(&destr_op_type);
+        let (s2, chained_optype) = self.chain(&arm_body_post_destr_instantiated, &body_optype)?;
+        let s = compose(&s2, &s1);
+        Ok((data_def, s, chained_optype))
+    }
+
     fn ti_op(&mut self, op: &Op) -> Err<(Subst, OpType)> {
         match op {
             Op::Literal(lit) => Ok((Subst::new(), self.ti_lit(lit))),
@@ -206,42 +230,10 @@ impl<'m> Inference<'m> {
                 Ok((Subst::new(), self.instantiate_op(&op_def.ann)))
             }
             Op::Case(head_arm, arms) => {
-                // find the matched object type by looking up the head arm constructor op post type
-                let head_constructor =
-                    self.module.op_defs.get(&head_arm.constr).ok_or_else(|| {
-                        InferenceError::UnknownConstructor(head_arm.constr.to_owned())
-                    })?;
-                let Body::Constructor(data_name) = &head_constructor.body else {
-                    return Err(InferenceError::NotAConstructor(head_arm.constr.to_owned()));
-                };
-                let Some(matched_data_def) = self.module.data_defs.get(data_name) else {
-                    unreachable!()
-                };
-                // ensure all constructors are covered exactly once
-                let all_constrs: HashSet<_> = matched_data_def.constrs.keys().collect();
-                let mut used_constrs = HashSet::new();
-                used_constrs.insert(&head_arm.constr);
-                for arm in arms {
-                    if !used_constrs.insert(&arm.constr) {
-                        return Err(InferenceError::DuplicateConstructor);
-                    }
-                }
-                if used_constrs.len() != all_constrs.len() {
-                    return Err(InferenceError::NotAllConstructorsCovered);
-                }
-                // infer the type of the first match arm
-                let (head_s, head_optype) = self.ti(&head_arm.body)?;
-                println!("head_s: {:?}; head_optype: {:?}", head_s, head_optype);
-                // chain it with the matched type constructor with pre and post fields flipped
-                let flipped_constructor = OpType {
-                    pre: head_constructor.ann.post.clone(),
-                    post: head_constructor.ann.pre.clone(),
-                };
-                let inst_flipped_constructor = self.instantiate_op(&flipped_constructor);
-                let (chain_s, arm_reference_optype) =
-                    self.chain(&inst_flipped_constructor, &head_optype)?;
-                let s = compose(&chain_s, &head_s);
-                Ok((s, arm_reference_optype))
+                // the head case arm which dictates which type would be matched, and what would
+                // be the output type
+                let (head_dd, _head_s, head_ot) = self.ti_case_arm(head_arm)?;
+                Ok((Subst::new(), head_ot))
             }
         }
     }

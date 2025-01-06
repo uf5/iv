@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Module {
     pub data_defs: HashMap<String, DataDef>,
     pub op_defs: HashMap<String, OpDef>,
@@ -50,13 +50,13 @@ impl Module {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DataDef {
     pub params: Vec<String>,
     pub constrs: HashMap<String, DataConstr>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DataConstr {
     pub params: Vec<Type>,
 }
@@ -84,31 +84,31 @@ impl OpType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct OpDef {
     pub ann: OpType,
     pub body: Body,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Body {
     Body(Vec<Op>),
     Constructor(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Op {
     Literal(Literal),
     Name(String),
     Case(CaseArm, Vec<CaseArm>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Literal {
     Int(i32),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CaseArm {
     pub constr: String,
     pub body: Vec<Op>,
