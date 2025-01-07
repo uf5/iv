@@ -247,11 +247,19 @@ impl<'m> Inference<'m> {
                     .ok_or_else(|| InferenceError::UnknownOp(n.clone()))?;
                 Ok((Subst::new(), self.instantiate_op(&op_def.ann)))
             }
-            Op::Case(head_arm, _arms) => {
+            Op::Case(head_arm, arms) => {
                 // the head case arm which dictates which type would be matched, and what would
                 // be the output type
-                let (_head_dd, _head_s, head_ot) = self.ti_case_arm(head_arm)?;
-                Ok((Subst::new(), head_ot))
+                let (_head_dd, _, mut ot) = self.ti_case_arm(head_arm)?;
+                let mut s = Subst::new();
+                for arm in arms {
+                    let (_arm_dd, _, mut arm_ot) = self.ti_case_arm(arm)?;
+                    (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
+                    let new_s = self.unify_op(&ot, &arm_ot)?;
+                    s = compose(&new_s, &s);
+                    ot = ot.apply(&s);
+                }
+                Ok((s, ot))
             }
         }
     }
@@ -314,14 +322,18 @@ mod noc_tests {
 
     #[test]
     fn sanity() {
-        let input = "define [a, a] nocadd [a]: 1 2 3.";
+        let input = "
+        define [a, a] nocadd [a]: 1 2 3.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_ok());
     }
 
     #[test]
     fn subst_int_ann_vs_inf() {
-        let input = "data Alpha:. define [a, a] nocadd [a]:.
+        let input = "
+        data Alpha:.
+        define [a, a] nocadd [a]:.
         define [Alpha, Alpha] intadd [Alpha]: nocadd.";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_ok());
@@ -329,7 +341,9 @@ mod noc_tests {
 
     #[test]
     fn ann_ss_pre() {
-        let input = "data Alpha:. define [a, a] nocadd [a]:.
+        let input = "
+        data Alpha: alpha.
+        define [a, a] nocadd [a]:.
         define [a, Alpha] intadd [Alpha]: nocadd.";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
@@ -337,118 +351,151 @@ mod noc_tests {
 
     #[test]
     fn ann_ss_post() {
-        let input = "data Alpha:. define [a, a] nocadd [a]:.
-        define [Alpha, a] intadd [Alpha]: nocadd.";
+        let input = "
+        data Alpha: alpha.
+        define [a, a] nocadd [a]:.
+        define [Alpha, a] intadd [Alpha]: nocadd.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
     }
 
     #[test]
     fn ann_ss_double() {
-        let input = "data Alpha:. define [a, a] nocadd [a]:.
-        define [a, a] intadd [Alpha]: nocadd.";
+        let input = "
+        data Alpha: alpha.
+        define [a, a] nocadd [a]:.
+        define [a, a] intadd [Alpha]: nocadd.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
     }
 
     #[test]
     fn ann_ss_trans_stack() {
-        let input = "data Alpha:. data Beta:. define [a] nocdup [a, a]:.
-        define [Alpha] intadd [Beta, Beta]: nocadd.";
+        let input = "
+        data Alpha: alpha.
+        data Beta: beta.
+        define [a] nocdup [a, a]:.
+        define [Alpha] intadd [Beta, Beta]: nocadd.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
     }
 
     #[test]
     fn ann_ss_trans_stack_ok() {
-        let input = "data Alpha:. data Beta:. data Gamma:. define [a, b, c] nocfoobar [c, b, a]:.
-        define [Alpha, Beta, Gamma] intadd [Gamma, Beta, Apha]: nocfoobar.";
+        let input = "
+        data Alpha:. data Beta:.
+        data Gamma:. define [a, b, c] nocfoobar [c, b, a]:.
+        define [Alpha, Beta, Gamma] intadd [Gamma, Beta, Apha]: nocfoobar.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
     }
 
     #[test]
     fn uf_triple_add_ok() {
-        let input = "define [a, a] nocadd [a]:.
-        define [a, a, a] tripleadd [a]: nocadd nocadd.";
+        let input = "
+        define [a, a] nocadd [a]:.
+        define [a, a, a] tripleadd [a]: nocadd nocadd.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_ok());
     }
 
     #[test]
     fn uf_triple_add_ok_spec() {
-        let input = "data Alpha:. data Beta:. define [a, a] nocadd [a]:.
-        define [Alpha, Alpha, Alpha] tripleadd [Alpha]: nocadd nocadd.";
+        let input = "
+        data Alpha:. data Beta:. define [a, a] nocadd [a]:.
+        define [Alpha, Alpha, Alpha] tripleadd [Alpha]: nocadd nocadd.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_ok());
     }
 
     #[test]
     fn uf_triple_add_ok_err1() {
-        let input = "data Alpha:. data Beta:. define [a, a] nocadd [a]:.
-        define [Alpha, Alpha, Alpha] tripleadd [a]: nocadd nocadd.";
+        let input = "
+        data Alpha:. data Beta:. define [a, a] nocadd [a]:.
+        define [Alpha, Alpha, Alpha] tripleadd [a]: nocadd nocadd.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
     }
 
     #[test]
     fn uf_triple_add_ok_err2() {
-        let input = "data Alpha:. data Beta:. define [a, a] nocadd [a]:.
-        define [Alpha, Alpha, Beta] tripleadd [Alpha]: nocadd nocadd.";
+        let input = "
+        data Alpha:. data Beta:. define [a, a] nocadd [a]:.
+        define [Alpha, Alpha, Beta] tripleadd [Alpha]: nocadd nocadd.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
     }
 
     #[test]
     fn of_triple1() {
-        let input = "data Alpha:. data Beta:.
+        let input = "
+        data Alpha:. data Beta:.
         define [a] nocdup [a, a]:.
-        define [a] tripledup [a, a, a]: nocdup nocdup.";
+        define [a] tripledup [a, a, a]: nocdup nocdup.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_ok());
     }
 
     #[test]
     fn op_triple2() {
-        let input = "data Alpha:. data Beta:.
+        let input = "
+        data Alpha:. data Beta:.
         define [a, a] nocadd [a]:.
         define [a] nocdup [a, a]:.
-        define [a] tripledup [a, a, a]: nocdup nocdup nocadd nocdup.";
+        define [a] tripledup [a, a, a]: nocdup nocdup nocadd nocdup.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_ok());
     }
 
     #[test]
     fn int_add_uf_chain() {
-        let input = "data Alpha: alpha. define [a, a] nocadd [a]:.
-        define [Alpha] alphainc [Alpha]: alpha nocadd.";
+        let input = "
+        data Alpha: alpha. define [a, a] nocadd [a]:.
+        define [Alpha] alphainc [Alpha]: alpha nocadd.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_ok());
     }
 
     #[test]
     fn int_add_datapoly() {
-        let input = "data Alpha: alpha.
+        let input = "
+        data Alpha: alpha.
         data Either a b: [a] left, [b] right.
-        define [] inteithertest [Either Alpha b]: alpha left.";
+        define [] inteithertest [Either Alpha b]: alpha left.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_ok());
     }
 
     #[test]
     fn int_add_datapoly_err() {
-        let input = "data Alpha: alpha.
+        let input = "
+        data Alpha: alpha.
         data Either a b: [a] left, [b] right.
-        define [] inteithertest [Either a Alpha]: alpha left.";
+        define [] inteithertest [Either a Alpha]: alpha left.
+        ";
         let module = parse(&input).unwrap();
         assert!(Inference::new(&module).infer().is_err());
     }
 
     #[test]
     fn case_maybe_nat() {
-        let input = "data Nat: zero, [Nat] suc.
+        let input = "
+        data Nat: zero, [Nat] suc.
         data Maybe a: nothing, [a] just.
-        define [Maybe Nat] incnatmaybe [Maybe Nat]: case { just { suc just }, nothing { nothing } }.";
+        define [Maybe Nat] incnatmaybe [Maybe Nat]: case { just { suc just }, nothing { nothing } }.
+        ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).infer();
         println!("{:?}", inferred);
@@ -456,8 +503,83 @@ mod noc_tests {
     }
 
     #[test]
+    fn case_maybe_nat_add_nop_expansion_err() {
+        let input = "
+        data Nat: zero, [Nat] suc.
+        data Maybe a: nothing, [a] just.
+        define [Nat, Nat] nocnatadd [Nat]:.
+        define [a] nocdup [a, a]:.
+        define [a, b, c] nocrot [c, a, b]:.
+        define [a, b] nocswap [b, a]:.
+        define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
+            case { just { nocswap nocdup nocdup nocrot nocnatadd just }, nothing { nothing } }.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
+    }
+
+    #[test]
+    fn case_maybe_nat_add_nop_expansion() {
+        let input = "
+        data Nat: zero, [Nat] suc.
+        data Maybe a: nothing, [a] just.
+        define [Nat, Nat] nocnatadd [Nat]:.
+        define [a] nocdup [a, a]:.
+        define [a, b, c] nocrot [c, a, b]:.
+        define [a, b] nocswap [b, a]:.
+        define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
+            case { just { nocswap nocdup nocrot nocnatadd just }, nothing { nothing } }.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn case_maybe_nat_add_nop_expansion_arms_swapped() {
+        let input = "
+        data Nat: zero, [Nat] suc.
+        data Maybe a: nothing, [a] just.
+        define [Nat, Nat] nocnatadd [Nat]:.
+        define [a] nocdup [a, a]:.
+        define [a, b, c] nocrot [c, a, b]:.
+        define [a, b] nocswap [b, a]:.
+        define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
+            case { nothing { nothing }, just { nocswap nocdup nocrot nocnatadd just } }.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn case_maybe_nat_add_nop_expansion_wrong_constr() {
+        let input = "
+        data Nat: zero, [Nat] suc.
+        data Maybe a: nothing, [a] just.
+        data Either a b: [a] left, [b] right.
+        define [Nat, Nat] nocnatadd [Nat]:.
+        define [a] nocdup [a, a]:.
+        define [a, b, c] nocrot [c, a, b]:.
+        define [a, b] nocswap [b, a]:.
+        define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
+            case { just { nocswap nocdup nocrot nocnatadd just }, left { nothing } }.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
+    }
+
+    #[test]
     fn nop_unification_test() {
-        let input = "define [a] nocnop [a]:. define [] nop []: nocnop.";
+        let input = "
+        define [a] nocnop [a]:. define [] nop []: nocnop.
+        ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).infer();
         println!("{:?}", inferred);
