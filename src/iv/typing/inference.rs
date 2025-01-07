@@ -215,7 +215,8 @@ impl<'m> Inference<'m> {
         let arm_body_post_destr_instantiated = self.instantiate_op(&destr_op_type);
         let (s2, chained_optype) = self.chain(&arm_body_post_destr_instantiated, &body_optype)?;
         let s = compose(&s2, &s1);
-        Ok((data_def, s, chained_optype))
+        let chained_optype_applied = chained_optype.apply(&s);
+        Ok((data_def, s, chained_optype_applied))
     }
 
     fn ti_op(&mut self, op: &Op) -> Err<(Subst, OpType)> {
@@ -232,7 +233,7 @@ impl<'m> Inference<'m> {
             Op::Case(head_arm, arms) => {
                 // the head case arm which dictates which type would be matched, and what would
                 // be the output type
-                let (head_dd, _head_s, head_ot) = self.ti_case_arm(head_arm)?;
+                let (head_dd, head_s, head_ot) = self.ti_case_arm(head_arm)?;
                 Ok((Subst::new(), head_ot))
             }
         }
