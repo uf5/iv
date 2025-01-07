@@ -108,7 +108,7 @@ impl<'m> Inference<'m> {
                     ))?,
                 }
             }
-            inferred_map.insert(op_name.clone(), inf.clone());
+            inferred_map.insert(op_name.clone(), inf.apply(&s));
         }
         Ok(inferred_map)
     }
@@ -165,14 +165,16 @@ impl<'m> Inference<'m> {
     }
 
     fn unify_op(&mut self, o1: &OpType, o2: &OpType) -> Err<Subst> {
-        let OpType {
-            pre: pre1,
-            post: post1,
-        } = o1;
-        let OpType {
-            pre: pre2,
-            post: post2,
-        } = o2;
+        let (
+            OpType {
+                pre: pre1,
+                post: post1,
+            },
+            OpType {
+                pre: pre2,
+                post: post2,
+            },
+        ) = self.balance_op_stack_lengths(o1.clone(), o2.clone());
         // ensure that the two types have the same size of pre and post stacks
         if pre1.len() != pre2.len() || post1.len() != post2.len() {
             return Err(InferenceError::UnificationError(
@@ -181,8 +183,23 @@ impl<'m> Inference<'m> {
             ));
         }
         // unify stacks
-        let s1 = self.unify_list(Subst::new(), pre1, pre2)?;
-        self.unify_list(s1, post1, post2)
+        let s1 = self.unify_list(Subst::new(), &pre1, &pre2)?;
+        self.unify_list(s1, &post1, &post2)
+    }
+
+    /// Perform nop-expansion on op type pre and post.
+    fn balance_op_stack_lengths(&mut self, mut o1: OpType, mut o2: OpType) -> (OpType, OpType) {
+        while o1.pre.len() < o2.pre.len() && o1.post.len() < o2.post.len() {
+            let new_var = self.gen_name();
+            o1.pre.push(new_var.clone());
+            o1.post.push(new_var.clone());
+        }
+        while o2.pre.len() < o1.pre.len() && o2.post.len() < o1.post.len() {
+            let new_var = self.gen_name();
+            o2.pre.push(new_var.clone());
+            o2.post.push(new_var.clone());
+        }
+        (o1, o2)
     }
 
     fn ti_lit(&self, lit: &Literal) -> OpType {
@@ -230,10 +247,10 @@ impl<'m> Inference<'m> {
                     .ok_or_else(|| InferenceError::UnknownOp(n.clone()))?;
                 Ok((Subst::new(), self.instantiate_op(&op_def.ann)))
             }
-            Op::Case(head_arm, arms) => {
+            Op::Case(head_arm, _arms) => {
                 // the head case arm which dictates which type would be matched, and what would
                 // be the output type
-                let (head_dd, head_s, head_ot) = self.ti_case_arm(head_arm)?;
+                let (_head_dd, _head_s, head_ot) = self.ti_case_arm(head_arm)?;
                 Ok((Subst::new(), head_ot))
             }
         }
@@ -432,6 +449,55 @@ mod noc_tests {
         let input = "data Nat: zero, [Nat] suc.
         data Maybe a: nothing, [a] just.
         define [Maybe Nat] incnatmaybe [Maybe Nat]: case { just { suc just }, nothing { nothing } }.";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn nop_unification_test() {
+        let input = "define [a] nocnop [a]:. define [] nop []: nocnop.";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn nop_unification_test_err_poly() {
+        let input = "
+        define [a] nocnonop [a, a]:.
+        define [] nop []: nocnonop.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
+    }
+
+    #[test]
+    fn nop_unification_test_err_mono() {
+        let input = "
+        data Alpha: alpha.
+        data Beta: beta.
+        define [Alpha] nocnonop [Beta]:.
+        define [] nop []: nocnonop.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
+    }
+
+    #[test]
+    fn nop_unification_test_complex() {
+        let input = "
+        data Maybe a: [a] just, nothing.
+        data Nat: [Nat] suc, zero.
+        define [Maybe Nat, Nat] nocfoobar [Maybe Nat, Nat]:.
+        define [Maybe Nat] nop [Maybe Nat]: nocfoobar.
+        ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).infer();
         println!("{:?}", inferred);
