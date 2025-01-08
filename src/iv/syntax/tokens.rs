@@ -24,10 +24,10 @@ pub enum Token<'source> {
     #[regex(r"[+-]?\d+", |lex| lex.slice().parse())]
     Number(i32),
 
-    #[regex(r"[a-z][A-Za-z0-9]*'*", |lex| lex.slice())]
+    #[regex(r"[a-z][A-Za-z0-9\-\+]*", |lex| lex.slice())]
     LIdent(&'source str),
 
-    #[regex(r"[A-Z][A-Za-z0-9]*'*", |lex| lex.slice())]
+    #[regex(r"[A-Z][A-Za-z0-9\-\+]*", |lex| lex.slice())]
     UIdent(&'source str),
 
     #[token("define")]
