@@ -13,7 +13,7 @@ pub enum InferenceError {
     ChainError,
     UnknownConstructor(String),
     NotAConstructor(String),
-    DuplicateConstructor,
+    DuplicateConstructor(String),
     NotAllConstructorsCovered,
     DifferentData(String),
 }
@@ -248,18 +248,28 @@ impl<'m> Inference<'m> {
                 Ok((Subst::new(), self.instantiate_op(&op_def.ann)))
             }
             Op::Case(head_arm, arms) => {
-                // the head case arm which dictates which type would be matched, and what would
-                // be the output type
-                let (_head_dd, _, mut ot) = self.ti_case_arm(head_arm)?;
+                let (head_dd, _, mut ot) = self.ti_case_arm(head_arm)?;
+                let constr_set_ideal: HashSet<String> = head_dd.constrs.keys().cloned().collect();
+                let mut covered_constructors = HashSet::new();
+                covered_constructors.insert(&head_arm.constr);
+
                 let mut s = Subst::new();
                 for arm in arms {
+                    if !covered_constructors.insert(&arm.constr) {
+                        return Err(InferenceError::DuplicateConstructor(arm.constr.clone()));
+                    }
                     let (_arm_dd, _, mut arm_ot) = self.ti_case_arm(arm)?;
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
                     let new_s = self.unify_op(&ot, &arm_ot)?;
                     s = compose(&new_s, &s);
                     ot = ot.apply(&s);
                 }
-                Ok((s, ot))
+
+                if covered_constructors == constr_set_ideal.iter().map(|c| c).collect() {
+                    Ok((s, ot))
+                } else {
+                    Err(InferenceError::NotAllConstructorsCovered)
+                }
             }
         }
     }
@@ -568,6 +578,34 @@ mod noc_tests {
         define [a, b] nocswap [b, a]:.
         define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
             case { just { nocswap nocdup nocrot nocnatadd just }, left { nothing } }.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
+    }
+
+    #[test]
+    fn case_totality() {
+        let input = "
+        data Expr:
+            int, float, string, add.
+        define [Expr] foobar [Int]:
+            case { int {1}, float {2}, string {3}, add {4}}.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).infer();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn case_totality_err() {
+        let input = "
+        data Expr:
+            int, float, string, add.
+        define [Expr] foobar [Int]:
+            case { int {1}, float {2}, add {4}}.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).infer();
