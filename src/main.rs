@@ -9,7 +9,7 @@ fn main() -> io::Result<()> {
     let module = parse(&input).unwrap();
     println!("{:?}", module);
     let mut inf = Inference::new(&module);
-    let inf_status = inf.infer();
+    let inf_status = inf.typecheck();
     println!("inf status: {:?}", &inf_status);
     Ok(())
 }

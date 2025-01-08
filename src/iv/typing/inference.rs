@@ -86,7 +86,7 @@ impl<'m> Inference<'m> {
         Inference { module, counter: 0 }
     }
 
-    pub fn infer(&mut self) -> Err<HashMap<String, OpType>> {
+    pub fn typecheck(&mut self) -> Err<HashMap<String, OpType>> {
         let mut inferred_map = HashMap::new();
         for (op_name, op_def) in self.module.op_defs.iter() {
             if op_name.starts_with("noc") {
@@ -113,7 +113,7 @@ impl<'m> Inference<'m> {
     }
 
     fn gen_name(&mut self) -> Type {
-        let name = format!("gen_{}", self.counter);
+        let name = format!("_gen_{}", self.counter);
         self.counter += 1;
         Type::Poly(name)
     }
@@ -201,7 +201,7 @@ impl<'m> Inference<'m> {
         (o1, o2)
     }
 
-    fn ti_lit(&self, lit: &Literal) -> OpType {
+    fn lit_optype(&self, lit: &Literal) -> OpType {
         let lit_type = match lit {
             Literal::Int(_) => Type::Mono("Int".to_owned()),
         };
@@ -211,7 +211,7 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn ti_case_arm<'a>(&'a mut self, arm: &CaseArm) -> Err<(&'a DataDef, Subst, OpType)> {
+    fn ti_case_arm<'a>(&'a mut self, arm: &CaseArm) -> Err<(&'a DataDef, OpType)> {
         let constr = self
             .module
             .op_defs
@@ -223,21 +223,21 @@ impl<'m> Inference<'m> {
         let Some(data_def) = self.module.data_defs.get(data_name) else {
             unreachable!();
         };
-        let destr_op_type = OpType {
+        let destr = OpType {
             pre: constr.ann.post.clone(),
             post: constr.ann.pre.clone(),
         };
         let (s1, body_optype) = self.ti(&arm.body)?;
-        let arm_body_post_destr_instantiated = self.instantiate_op(&destr_op_type);
-        let (s2, chained_optype) = self.chain(&arm_body_post_destr_instantiated, &body_optype)?;
+        let inst_destr = self.instantiate_op(&destr);
+        let (s2, chained_optype) = self.chain(inst_destr, body_optype)?;
         let s = compose(s2, s1);
         let chained_optype_applied = chained_optype.apply(&s);
-        Ok((data_def, s, chained_optype_applied))
+        Ok((data_def, chained_optype_applied))
     }
 
     fn ti_op(&mut self, op: &Op) -> Err<(Subst, OpType)> {
         match op {
-            Op::Literal(lit) => Ok((Subst::new(), self.ti_lit(lit))),
+            Op::Literal(lit) => Ok((Subst::new(), self.lit_optype(lit))),
             Op::Name(n) => {
                 let op_def = self
                     .module
@@ -247,7 +247,7 @@ impl<'m> Inference<'m> {
                 Ok((Subst::new(), self.instantiate_op(&op_def.ann)))
             }
             Op::Case(head_arm, arms) => {
-                let (head_dd, _, mut ot) = self.ti_case_arm(head_arm)?;
+                let (head_dd, mut ot) = self.ti_case_arm(head_arm)?;
                 let constr_set_ideal: HashSet<String> = head_dd.constrs.keys().cloned().collect();
                 let mut covered_constructors = HashSet::new();
                 covered_constructors.insert(&head_arm.constr);
@@ -257,7 +257,7 @@ impl<'m> Inference<'m> {
                     if !covered_constructors.insert(&arm.constr) {
                         return Err(InferenceError::DuplicateConstructor(arm.constr.clone()));
                     }
-                    let (_arm_dd, _, mut arm_ot) = self.ti_case_arm(arm)?;
+                    let (_arm_dd, mut arm_ot) = self.ti_case_arm(arm)?;
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
                     let new_s = self.unify_op(&ot, &arm_ot)?;
                     s = compose(new_s, s);
@@ -274,7 +274,7 @@ impl<'m> Inference<'m> {
     }
 
     /// Chain two operator types through unification. This includes overflow and underflow chain.
-    fn chain(&mut self, ot1: &OpType, ot2: &OpType) -> Err<(Subst, OpType)> {
+    fn chain(&mut self, ot1: OpType, ot2: OpType) -> Err<(Subst, OpType)> {
         let OpType {
             pre: alpha,
             post: beta,
@@ -313,7 +313,7 @@ impl<'m> Inference<'m> {
             [o, os @ ..] => {
                 let (s1, t1) = self.ti_op(o)?;
                 let (s2, t2) = self.ti(os)?;
-                let (s3, t3) = self.chain(&t1, &t2)?;
+                let (s3, t3) = self.chain(t1, t2)?;
                 let s = compose(s3, compose(s2, s1));
                 let t = t3.apply(&s);
                 Ok((s, t))
@@ -333,7 +333,7 @@ mod inference_tests {
         define [a, a] nocadd [a]: 1 2 3.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_ok());
+        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
     #[test]
@@ -343,7 +343,7 @@ mod inference_tests {
         define [a, a] nocadd [a]:.
         define [Alpha, Alpha] intadd [Alpha]: nocadd.";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_ok());
+        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
     #[test]
@@ -353,7 +353,7 @@ mod inference_tests {
         define [a, a] nocadd [a]:.
         define [a, Alpha] intadd [Alpha]: nocadd.";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_err());
+        assert!(Inference::new(&module).typecheck().is_err());
     }
 
     #[test]
@@ -364,7 +364,7 @@ mod inference_tests {
         define [Alpha, a] intadd [Alpha]: nocadd.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_err());
+        assert!(Inference::new(&module).typecheck().is_err());
     }
 
     #[test]
@@ -375,7 +375,7 @@ mod inference_tests {
         define [a, a] intadd [Alpha]: nocadd.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_err());
+        assert!(Inference::new(&module).typecheck().is_err());
     }
 
     #[test]
@@ -387,7 +387,7 @@ mod inference_tests {
         define [Alpha] intadd [Beta, Beta]: nocadd.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_err());
+        assert!(Inference::new(&module).typecheck().is_err());
     }
 
     #[test]
@@ -398,7 +398,7 @@ mod inference_tests {
         define [Alpha, Beta, Gamma] intadd [Gamma, Beta, Apha]: nocfoobar.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_err());
+        assert!(Inference::new(&module).typecheck().is_err());
     }
 
     #[test]
@@ -408,7 +408,7 @@ mod inference_tests {
         define [a, a, a] tripleadd [a]: nocadd nocadd.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_ok());
+        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
     #[test]
@@ -418,7 +418,7 @@ mod inference_tests {
         define [Alpha, Alpha, Alpha] tripleadd [Alpha]: nocadd nocadd.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_ok());
+        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
     #[test]
@@ -428,7 +428,7 @@ mod inference_tests {
         define [Alpha, Alpha, Alpha] tripleadd [a]: nocadd nocadd.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_err());
+        assert!(Inference::new(&module).typecheck().is_err());
     }
 
     #[test]
@@ -438,7 +438,7 @@ mod inference_tests {
         define [Alpha, Alpha, Beta] tripleadd [Alpha]: nocadd nocadd.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_err());
+        assert!(Inference::new(&module).typecheck().is_err());
     }
 
     #[test]
@@ -449,7 +449,7 @@ mod inference_tests {
         define [a] tripledup [a, a, a]: nocdup nocdup.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_ok());
+        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
     #[test]
@@ -461,7 +461,7 @@ mod inference_tests {
         define [a] tripledup [a, a, a]: nocdup nocdup nocadd nocdup.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_ok());
+        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
     #[test]
@@ -471,7 +471,7 @@ mod inference_tests {
         define [Alpha] alphainc [Alpha]: alpha nocadd.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_ok());
+        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod inference_tests {
         define [] inteithertest [Either Alpha b]: alpha left.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_ok());
+        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
     #[test]
@@ -493,7 +493,7 @@ mod inference_tests {
         define [] inteithertest [Either a Alpha]: alpha left.
         ";
         let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).infer().is_err());
+        assert!(Inference::new(&module).typecheck().is_err());
     }
 
     #[test]
@@ -504,7 +504,7 @@ mod inference_tests {
         define [Maybe Nat] incnatmaybe [Maybe Nat]: case { just { suc just }, nothing { nothing } }.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
     }
@@ -522,7 +522,7 @@ mod inference_tests {
             case { just { nocswap nocdup nocdup nocrot nocnatadd just }, nothing { nothing } }.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_err());
     }
@@ -540,7 +540,7 @@ mod inference_tests {
             case { just { nocswap nocdup nocrot nocnatadd just }, nothing { nothing } }.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
     }
@@ -558,7 +558,7 @@ mod inference_tests {
             case { nothing { nothing }, just { nocswap nocdup nocrot nocnatadd just } }.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
     }
@@ -577,7 +577,7 @@ mod inference_tests {
             case { just { nocswap nocdup nocrot nocnatadd just }, left { nothing } }.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_err());
     }
@@ -591,7 +591,7 @@ mod inference_tests {
             case { int {1}, float {2}, string {3}, add {4}}.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
     }
@@ -605,7 +605,7 @@ mod inference_tests {
             case { int {1}, float {2}, add {4}}.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_err());
     }
@@ -616,7 +616,7 @@ mod inference_tests {
         define [a] nocnop [a]:. define [] nop []: nocnop.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
     }
@@ -628,7 +628,7 @@ mod inference_tests {
         define [] nop []: nocnonop.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_err());
     }
@@ -642,7 +642,7 @@ mod inference_tests {
         define [] nop []: nocnonop.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_err());
     }
@@ -656,7 +656,7 @@ mod inference_tests {
         define [Maybe Nat] nop [Maybe Nat]: nocfoobar.
         ";
         let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).infer();
+        let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
     }
