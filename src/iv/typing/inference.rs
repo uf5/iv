@@ -22,11 +22,10 @@ type Err<T> = Result<T, InferenceError>;
 
 type Subst = HashMap<String, Type>;
 
-fn compose(s1: &Subst, s2: &Subst) -> Subst {
-    s2.iter()
-        .map(|(v, t)| (v.to_owned(), t.apply(s1)))
-        .chain(s1.clone().into_iter())
-        .collect()
+fn compose(s1: Subst, s2: Subst) -> Subst {
+    let mut s: Subst = s2.into_iter().map(|(v, t)| (v, t.apply(&s1))).collect();
+    s.extend(s1);
+    s
 }
 
 trait Typeable {
@@ -146,7 +145,7 @@ impl<'m> Inference<'m> {
             (Type::App(l1, r1), Type::App(l2, r2)) => {
                 let s1 = self.unify(l1, l2)?;
                 let s2 = self.unify(&r1.apply(&s1), &r2.apply(&s1))?;
-                Ok(compose(&s2, &s1))
+                Ok(compose(s2, s1))
             }
             (Type::Op(o1), Type::Op(o2)) => self.unify_op(o1, o2),
             (_, _) => Err(InferenceError::UnificationError(t1.clone(), t2.clone())),
@@ -158,8 +157,8 @@ impl<'m> Inference<'m> {
     fn unify_list(&mut self, s: Subst, l1: &[Type], l2: &[Type]) -> Err<Subst> {
         zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
             Ok(compose(
-                &self.unify(&t1.apply(&s_acc), &t2.apply(&s_acc))?,
-                &s_acc,
+                self.unify(&t1.apply(&s_acc), &t2.apply(&s_acc))?,
+                s_acc,
             ))
         })
     }
@@ -231,7 +230,7 @@ impl<'m> Inference<'m> {
         let (s1, body_optype) = self.ti(&arm.body)?;
         let arm_body_post_destr_instantiated = self.instantiate_op(&destr_op_type);
         let (s2, chained_optype) = self.chain(&arm_body_post_destr_instantiated, &body_optype)?;
-        let s = compose(&s2, &s1);
+        let s = compose(s2, s1);
         let chained_optype_applied = chained_optype.apply(&s);
         Ok((data_def, s, chained_optype_applied))
     }
@@ -261,7 +260,7 @@ impl<'m> Inference<'m> {
                     let (_arm_dd, _, mut arm_ot) = self.ti_case_arm(arm)?;
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
                     let new_s = self.unify_op(&ot, &arm_ot)?;
-                    s = compose(&new_s, &s);
+                    s = compose(new_s, s);
                     ot = ot.apply(&s);
                 }
 
@@ -315,7 +314,7 @@ impl<'m> Inference<'m> {
                 let (s1, t1) = self.ti_op(o)?;
                 let (s2, t2) = self.ti(os)?;
                 let (s3, t3) = self.chain(&t1, &t2)?;
-                let s = compose(&s3, &compose(&s2, &s1));
+                let s = compose(s3, compose(s2, s1));
                 let t = t3.apply(&s);
                 Ok((s, t))
             }
