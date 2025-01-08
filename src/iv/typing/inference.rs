@@ -95,9 +95,9 @@ impl<'m> Inference<'m> {
             let Body::Body(ref body) = op_def.body else {
                 continue;
             };
-            let (_, inf) = self.ti(&body)?;
+            let (_, inf) = self.infer(&body)?;
             let s = self.unify_op(&op_def.ann, &inf)?;
-            // ann matches the inf when all subs values are poly
+            // ann matches the inf when all subs associated with ftv of annotation are poly
             for v in op_def.ann.ftv().iter().filter_map(|t| s.get(t)) {
                 match v {
                     Type::Poly(_) => (),
@@ -186,7 +186,7 @@ impl<'m> Inference<'m> {
         self.unify_list(s1, &post1, &post2)
     }
 
-    /// Perform nop-expansion on op type pre and post.
+    /// Try to make both optypes have the same lengths of pre and post
     fn balance_op_stack_lengths(&mut self, mut o1: OpType, mut o2: OpType) -> (OpType, OpType) {
         while o1.pre.len() < o2.pre.len() && o1.post.len() < o2.post.len() {
             let new_var = self.gen_name();
@@ -211,7 +211,7 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn ti_case_arm<'a>(&'a mut self, arm: &CaseArm) -> Err<(&'a DataDef, OpType)> {
+    fn infer_case_arm<'a>(&'a mut self, arm: &CaseArm) -> Err<(&'a DataDef, OpType)> {
         let constr = self
             .module
             .op_defs
@@ -227,7 +227,7 @@ impl<'m> Inference<'m> {
             pre: constr.ann.post.clone(),
             post: constr.ann.pre.clone(),
         };
-        let (s1, body_optype) = self.ti(&arm.body)?;
+        let (s1, body_optype) = self.infer(&arm.body)?;
         let inst_destr = self.instantiate_op(&destr);
         let (s2, chained_optype) = self.chain(inst_destr, body_optype)?;
         let s = compose(s2, s1);
@@ -235,19 +235,19 @@ impl<'m> Inference<'m> {
         Ok((data_def, chained_optype_applied))
     }
 
-    fn ti_op(&mut self, op: &Op) -> Err<(Subst, OpType)> {
+    fn infer_op(&mut self, op: &Op) -> Err<OpType> {
         match op {
-            Op::Literal(lit) => Ok((Subst::new(), self.lit_optype(lit))),
+            Op::Literal(lit) => Ok(self.lit_optype(lit)),
             Op::Name(n) => {
                 let op_def = self
                     .module
                     .op_defs
                     .get(n)
                     .ok_or_else(|| InferenceError::UnknownOp(n.clone()))?;
-                Ok((Subst::new(), self.instantiate_op(&op_def.ann)))
+                Ok(self.instantiate_op(&op_def.ann))
             }
             Op::Case(head_arm, arms) => {
-                let (head_dd, mut ot) = self.ti_case_arm(head_arm)?;
+                let (head_dd, mut ot) = self.infer_case_arm(head_arm)?;
                 let constr_set_ideal: HashSet<String> = head_dd.constrs.keys().cloned().collect();
                 let mut covered_constructors = HashSet::new();
                 covered_constructors.insert(&head_arm.constr);
@@ -257,7 +257,7 @@ impl<'m> Inference<'m> {
                     if !covered_constructors.insert(&arm.constr) {
                         return Err(InferenceError::DuplicateConstructor(arm.constr.clone()));
                     }
-                    let (_arm_dd, mut arm_ot) = self.ti_case_arm(arm)?;
+                    let (_arm_dd, mut arm_ot) = self.infer_case_arm(arm)?;
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
                     let new_s = self.unify_op(&ot, &arm_ot)?;
                     s = compose(new_s, s);
@@ -265,7 +265,7 @@ impl<'m> Inference<'m> {
                 }
 
                 if covered_constructors == constr_set_ideal.iter().map(|c| c).collect() {
-                    Ok((s, ot))
+                    Ok(ot)
                 } else {
                     Err(InferenceError::NotAllConstructorsCovered)
                 }
@@ -307,14 +307,15 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn ti(&mut self, ops: &[Op]) -> Err<(Subst, OpType)> {
+    /// Infer the type of a sentence
+    fn infer(&mut self, ops: &[Op]) -> Err<(Subst, OpType)> {
         match ops {
             [] => Ok((Subst::new(), OpType::empty())),
             [o, os @ ..] => {
-                let (s1, t1) = self.ti_op(o)?;
-                let (s2, t2) = self.ti(os)?;
+                let t1 = self.infer_op(o)?;
+                let (s2, t2) = self.infer(os)?;
                 let (s3, t3) = self.chain(t1, t2)?;
-                let s = compose(s3, compose(s2, s1));
+                let s = compose(s3, s2);
                 let t = t3.apply(&s);
                 Ok((s, t))
             }
