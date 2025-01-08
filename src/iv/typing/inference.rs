@@ -211,7 +211,7 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn infer_case_arm<'a>(&'a mut self, arm: &CaseArm) -> Err<(&'a DataDef, OpType)> {
+    fn infer_case_arm(&mut self, arm: &CaseArm) -> Err<(&'m DataDef, OpType)> {
         let constr = self
             .module
             .op_defs
@@ -221,16 +221,18 @@ impl<'m> Inference<'m> {
             return Err(InferenceError::NotAConstructor(arm.constr.clone()));
         };
         let Some(data_def) = self.module.data_defs.get(data_name) else {
-            unreachable!();
+            panic!(
+                "Check that the Module is created using the Module::new function. Check that the \
+                Module is not changed after initial creation during parsing."
+            );
         };
         let destr = OpType {
             pre: constr.ann.post.clone(),
             post: constr.ann.pre.clone(),
         };
-        let (s1, body_optype) = self.infer(&arm.body)?;
+        let (_, body_optype) = self.infer(&arm.body)?;
         let inst_destr = self.instantiate_op(&destr);
-        let (s2, chained_optype) = self.chain(inst_destr, body_optype)?;
-        let s = compose(s2, s1);
+        let (s, chained_optype) = self.chain(inst_destr, body_optype)?;
         let chained_optype_applied = chained_optype.apply(&s);
         Ok((data_def, chained_optype_applied))
     }
@@ -248,7 +250,6 @@ impl<'m> Inference<'m> {
             }
             Op::Case(head_arm, arms) => {
                 let (head_dd, mut ot) = self.infer_case_arm(head_arm)?;
-                let constr_set_ideal: HashSet<String> = head_dd.constrs.keys().cloned().collect();
                 let mut covered_constructors = HashSet::new();
                 covered_constructors.insert(&head_arm.constr);
 
@@ -257,14 +258,14 @@ impl<'m> Inference<'m> {
                     if !covered_constructors.insert(&arm.constr) {
                         return Err(InferenceError::DuplicateConstructor(arm.constr.clone()));
                     }
-                    let (_arm_dd, mut arm_ot) = self.infer_case_arm(arm)?;
+                    let (_, mut arm_ot) = self.infer_case_arm(arm)?;
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
                     let new_s = self.unify_op(&ot, &arm_ot)?;
                     s = compose(new_s, s);
                     ot = ot.apply(&s);
                 }
 
-                if covered_constructors == constr_set_ideal.iter().map(|c| c).collect() {
+                if covered_constructors == head_dd.constrs.keys().collect() {
                     Ok(ot)
                 } else {
                     Err(InferenceError::NotAllConstructorsCovered)
