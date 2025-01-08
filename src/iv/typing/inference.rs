@@ -322,10 +322,8 @@ impl<'m> Inference<'m> {
     }
 }
 
-/// Test suite designed around the "noc" nocheck prefix. That allows creating different scenarios
-/// in the inference process.
 #[cfg(test)]
-mod noc_tests {
+mod inference_tests {
     use crate::iv::syntax::parse;
     use crate::iv::typing::inference::*;
 
