@@ -1,7 +1,5 @@
-pub mod iv;
-
-use crate::iv::syntax::parse;
-use crate::iv::typing::inference::*;
+use iv::syntax::parse;
+use iv::typing::inference::Inference;
 use std::io;
 
 fn main() -> io::Result<()> {

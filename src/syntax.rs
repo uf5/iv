@@ -2,7 +2,7 @@ use lalrpop_util::lalrpop_mod;
 
 mod lexer;
 mod tokens;
-lalrpop_mod!(parser, "/iv/syntax/parser.rs");
+lalrpop_mod!(parser, "/syntax/parser.rs");
 
 use super::types::Module;
 use lexer::Lexer;

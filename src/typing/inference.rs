@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::zip;
 
-use crate::iv::types::*;
+use crate::types::*;
 
 #[derive(Debug)]
 pub enum InferenceError {
@@ -344,8 +344,8 @@ impl<'m> Inference<'m> {
 
 #[cfg(test)]
 mod inference_tests {
-    use crate::iv::syntax::parse;
-    use crate::iv::typing::inference::*;
+    use crate::syntax::parse;
+    use crate::typing::inference::*;
 
     #[test]
     fn sanity() {
