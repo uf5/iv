@@ -15,7 +15,7 @@ pub enum InferenceError {
     NotAConstructor(String),
     DuplicateConstructor(String),
     NotAllConstructorsCovered,
-    DifferentData(String),
+    ConstructorBelongsToDifferentData(String),
 }
 
 type Err<T> = Result<T, InferenceError>;
@@ -211,13 +211,13 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn infer_case_arm(&mut self, arm: &CaseArm) -> Err<(&'m DataDef, OpType)> {
-        let constr = self
+    fn get_constr_info(&self, arm: &CaseArm) -> Err<(&'m OpType, &'m DataDef)> {
+        let op_def = self
             .module
             .op_defs
             .get(&arm.constr)
             .ok_or_else(|| InferenceError::UnknownConstructor(arm.constr.to_owned()))?;
-        let Body::Constructor(data_name) = &constr.body else {
+        let Body::Constructor(data_name) = &op_def.body else {
             return Err(InferenceError::NotAConstructor(arm.constr.clone()));
         };
         let Some(data_def) = self.module.data_defs.get(data_name) else {
@@ -226,12 +226,25 @@ impl<'m> Inference<'m> {
                 Module is not changed after initial creation during parsing."
             );
         };
-        let destr = OpType {
-            pre: constr.ann.post.clone(),
-            post: constr.ann.pre.clone(),
-        };
+        Ok((&op_def.ann, &data_def))
+    }
+
+    fn make_destr(constr: &OpType) -> OpType {
+        OpType {
+            pre: constr.post.clone(),
+            post: constr.pre.clone(),
+        }
+    }
+
+    fn infer_case_arm(&mut self, arm: &CaseArm) -> Err<(&'m DataDef, OpType)> {
+        // find the constructor op type and the data def associated with the constructor
+        let (constr_ot, data_def) = self.get_constr_info(arm)?;
+        // infer the op type of the body
         let (_, body_optype) = self.infer(&arm.body)?;
+        // create a destructor from the constructor op type and instantiate it
+        let destr = Self::make_destr(constr_ot);
         let inst_destr = self.instantiate_op(&destr);
+        // chain the destructor with the arm body to get the complete op type
         let (s, chained_optype) = self.chain(inst_destr, body_optype)?;
         let chained_optype_applied = chained_optype.apply(&s);
         Ok((data_def, chained_optype_applied))
@@ -258,7 +271,12 @@ impl<'m> Inference<'m> {
                     if !covered_constructors.insert(&arm.constr) {
                         return Err(InferenceError::DuplicateConstructor(arm.constr.clone()));
                     }
-                    let (_, mut arm_ot) = self.infer_case_arm(arm)?;
+                    let (arm_dd, mut arm_ot) = self.infer_case_arm(arm)?;
+                    if head_dd != arm_dd {
+                        return Err(InferenceError::ConstructorBelongsToDifferentData(
+                            arm.constr.clone(),
+                        ));
+                    }
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
                     let new_s = self.unify_op(&ot, &arm_ot)?;
                     s = compose(new_s, s);
