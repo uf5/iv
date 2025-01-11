@@ -343,7 +343,7 @@ impl<'m> Inference<'m> {
 }
 
 #[cfg(test)]
-mod inference_tests {
+mod tests {
     use crate::syntax::parse;
     use crate::typing::inference::*;
 
