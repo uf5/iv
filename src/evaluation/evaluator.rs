@@ -87,6 +87,7 @@ impl<'m> Evaluator<'m> {
                 self.stack.extend(matched_value.args.into_iter().rev());
                 self.eval_sentence(&matching_arm.body);
             }
+            Op::Quote(vec) => todo!(),
         }
     }
 }

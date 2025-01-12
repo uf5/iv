@@ -100,6 +100,7 @@ pub enum Body {
 pub enum Op {
     Literal(Literal),
     Name(String),
+    Quote(Vec<Op>),
     Case(CaseArm, Vec<CaseArm>),
 }
 

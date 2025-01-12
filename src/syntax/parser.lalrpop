@@ -60,6 +60,7 @@ OpDef: (String, OpDef) = {
 Op: Op = {
     <lit:Literal> => Op::Literal(lit),
     <name:"lident"> => Op::Name(name.to_owned()),
+    "(" <ops:Op*> ")" => Op::Quote(ops),
     "case" "{" <head_arm:CaseArm> "}" => {
         Op::Case(head_arm, vec![])
     },

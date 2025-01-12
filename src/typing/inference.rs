@@ -289,6 +289,13 @@ impl<'m> Inference<'m> {
                     Err(InferenceError::NotAllConstructorsCovered)
                 }
             }
+            Op::Quote(ops) => {
+                let (_, quoted_optype) = self.infer(ops)?;
+                Ok(OpType {
+                    pre: vec![],
+                    post: vec![Type::Op(quoted_optype)],
+                })
+            }
         }
     }
 
@@ -674,6 +681,17 @@ mod tests {
         data Nat: [Nat] suc, zero.
         define [Maybe Nat, Nat] nocfoobar [Maybe Nat, Nat]:.
         define [Maybe Nat] nop [Maybe Nat]: nocfoobar.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn op_quote_test() {
+        let input = "
+        define [] foobar [[][Int, Int, Int]]: (1 2 3).
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
