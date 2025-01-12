@@ -23,8 +23,8 @@ type Err<T> = Result<T, InferenceError>;
 type Subst = HashMap<String, Type>;
 
 fn compose(s1: Subst, s2: Subst) -> Subst {
-    let mut s: Subst = s2.into_iter().map(|(v, t)| (v, t.apply(&s1))).collect();
-    s.extend(s1);
+    let mut s: Subst = s1.into_iter().map(|(v, t)| (v, t.apply(&s2))).collect();
+    s.extend(s2);
     s
 }
 
@@ -95,7 +95,7 @@ impl<'m> Inference<'m> {
             let Body::Body(ref body) = op_def.body else {
                 continue;
             };
-            let (_, inf) = self.infer(&body)?;
+            let inf = self.infer(&body)?;
             let s = self.unify_op(&op_def.ann, &inf)?;
             // ann matches the inf when all subs associated with ftv of annotation are poly
             for v in op_def.ann.ftv().iter().filter_map(|t| s.get(t)) {
@@ -145,7 +145,7 @@ impl<'m> Inference<'m> {
             (Type::App(l1, r1), Type::App(l2, r2)) => {
                 let s1 = self.unify(l1, l2)?;
                 let s2 = self.unify(&r1.clone().apply(&s1), &r2.clone().apply(&s1))?;
-                Ok(compose(s2, s1))
+                Ok(compose(s1, s2))
             }
             (Type::Op(o1), Type::Op(o2)) => self.unify_op(o1, o2),
             (_, _) => Err(InferenceError::UnificationError(t1.clone(), t2.clone())),
@@ -156,10 +156,8 @@ impl<'m> Inference<'m> {
     /// Performs min(l1.len(), l2.len()) unifications.
     fn unify_list(&mut self, s: Subst, l1: &[Type], l2: &[Type]) -> Err<Subst> {
         zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
-            Ok(compose(
-                self.unify(&t1.clone().apply(&s_acc), &t2.clone().apply(&s_acc))?,
-                s_acc,
-            ))
+            let s = self.unify(&t1.clone().apply(&s_acc), &t2.clone().apply(&s_acc))?;
+            Ok(compose(s_acc, s))
         })
     }
 
@@ -240,7 +238,7 @@ impl<'m> Inference<'m> {
         // find the constructor op type and the data def associated with the constructor
         let (constr_ot, data_def) = self.get_constr_info(arm)?;
         // infer the op type of the body
-        let (_, body_optype) = self.infer(&arm.body)?;
+        let body_optype = self.infer(&arm.body)?;
         // create a destructor from the constructor op type and instantiate it
         let destr = Self::make_destr(constr_ot);
         let inst_destr = self.instantiate_op(&destr);
@@ -279,7 +277,7 @@ impl<'m> Inference<'m> {
                     }
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
                     let new_s = self.unify_op(&ot, &arm_ot)?;
-                    s = compose(new_s, s);
+                    s = compose(s, new_s);
                     ot = ot.apply(&s);
                 }
 
@@ -290,7 +288,7 @@ impl<'m> Inference<'m> {
                 }
             }
             Op::Quote(ops) => {
-                let (_, quoted_optype) = self.infer(ops)?;
+                let quoted_optype = self.infer(ops)?;
                 Ok(OpType {
                     pre: vec![],
                     post: vec![Type::Op(quoted_optype)],
@@ -333,19 +331,24 @@ impl<'m> Inference<'m> {
         }
     }
 
-    /// Infer the type of a sentence
-    fn infer(&mut self, ops: &[Op]) -> Err<(Subst, OpType)> {
+    fn infer_rest(&mut self, ops: &[Op]) -> Err<(Subst, OpType)> {
         match ops {
             [] => Ok((Subst::new(), OpType::empty())),
             [o, os @ ..] => {
                 let t1 = self.infer_op(o)?;
-                let (s2, t2) = self.infer(os)?;
+                let (s2, t2) = self.infer_rest(os)?;
                 let (s3, t3) = self.chain(t1, t2)?;
-                let s = compose(s3, s2);
+                let s = compose(s2, s3);
                 let t = t3.apply(&s);
                 Ok((s, t))
             }
         }
+    }
+
+    /// Infer the type of a sentence
+    fn infer(&mut self, ops: &[Op]) -> Err<OpType> {
+        let (_, op_type) = self.infer_rest(ops)?;
+        Ok(op_type)
     }
 }
 
