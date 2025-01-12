@@ -30,7 +30,7 @@ fn compose(s1: Subst, s2: Subst) -> Subst {
 
 trait Typeable {
     fn ftv(&self) -> HashSet<String>;
-    fn apply(&self, subst: &Subst) -> Self;
+    fn apply(self, subst: &Subst) -> Self;
 }
 
 impl Typeable for Type {
@@ -47,12 +47,12 @@ impl Typeable for Type {
         }
     }
 
-    fn apply(&self, subst: &Subst) -> Self {
+    fn apply(self, subst: &Subst) -> Self {
         match self {
             Type::Mono(_) => self.clone(),
-            Type::Poly(v) => match subst.get(v) {
+            Type::Poly(v) => match subst.get(&v) {
                 Some(t) => t.clone(),
-                None => self.clone(),
+                None => Type::Poly(v),
             },
             Type::Op(op_type) => Type::Op(op_type.apply(subst)),
             Type::App(t1, t2) => Type::App(Box::new(t1.apply(subst)), Box::new(t2.apply(subst))),
@@ -69,9 +69,9 @@ impl Typeable for OpType {
             .collect()
     }
 
-    fn apply(&self, subst: &Subst) -> Self {
-        let pre = self.pre.iter().map(|t| t.apply(subst)).collect();
-        let post = self.post.iter().map(|t| t.apply(subst)).collect();
+    fn apply(self, subst: &Subst) -> Self {
+        let pre = self.pre.into_iter().map(|t| t.apply(subst)).collect();
+        let post = self.post.into_iter().map(|t| t.apply(subst)).collect();
         OpType { pre, post }
     }
 }
@@ -124,7 +124,7 @@ impl<'m> Inference<'m> {
             .iter()
             .map(|v| (v.to_owned(), self.gen_name()))
             .collect();
-        op.apply(&new_var_subst)
+        op.clone().apply(&new_var_subst)
     }
 
     /// Unify two types. t1 has priority over t2, i.e., (Poly(v), t) is picked over (t, Poly(v)).
@@ -144,7 +144,7 @@ impl<'m> Inference<'m> {
             }
             (Type::App(l1, r1), Type::App(l2, r2)) => {
                 let s1 = self.unify(l1, l2)?;
-                let s2 = self.unify(&r1.apply(&s1), &r2.apply(&s1))?;
+                let s2 = self.unify(&r1.clone().apply(&s1), &r2.clone().apply(&s1))?;
                 Ok(compose(s2, s1))
             }
             (Type::Op(o1), Type::Op(o2)) => self.unify_op(o1, o2),
@@ -157,7 +157,7 @@ impl<'m> Inference<'m> {
     fn unify_list(&mut self, s: Subst, l1: &[Type], l2: &[Type]) -> Err<Subst> {
         zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
             Ok(compose(
-                self.unify(&t1.apply(&s_acc), &t2.apply(&s_acc))?,
+                self.unify(&t1.clone().apply(&s_acc), &t2.clone().apply(&s_acc))?,
                 s_acc,
             ))
         })
@@ -312,23 +312,23 @@ impl<'m> Inference<'m> {
         let s = self.unify_list(Subst::new(), &beta, &gamma)?;
         if beta.len() >= gamma.len() {
             // overflow chain
-            let beta_skip_gamma = beta.iter().skip(gamma.len());
-            let pre = alpha.iter().map(|t| t.apply(&s)).collect();
+            let beta_skip_gamma = beta.into_iter().skip(gamma.len());
+            let pre = alpha.into_iter().map(|t| t.apply(&s)).collect();
             let post = delta
-                .iter()
+                .into_iter()
                 .chain(beta_skip_gamma)
                 .map(|t| t.apply(&s))
                 .collect();
             Ok((s, OpType { pre, post }))
         } else {
             // underflow chain
-            let gamma_skip_beta = gamma.iter().skip(beta.len());
+            let gamma_skip_beta = gamma.into_iter().skip(beta.len());
             let pre = alpha
-                .iter()
+                .into_iter()
                 .chain(gamma_skip_beta)
                 .map(|t| t.apply(&s))
                 .collect();
-            let post = delta.iter().map(|t| t.apply(&s)).collect();
+            let post = delta.into_iter().map(|t| t.apply(&s)).collect();
             Ok((s, OpType { pre, post }))
         }
     }
