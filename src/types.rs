@@ -96,7 +96,7 @@ pub enum Body {
     Constructor(String),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Op {
     Literal(Literal),
     Name(String),
@@ -104,12 +104,12 @@ pub enum Op {
     Case(CaseArm, Vec<CaseArm>),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Literal {
     Int(i32),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CaseArm {
     pub constr: String,
     pub body: Vec<Op>,

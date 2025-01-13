@@ -3,7 +3,7 @@ use crate::types::*;
 
 pub struct Evaluator<'m> {
     module: &'m Module,
-    pub stack: Vec<Value<'m>>,
+    pub stack: Vec<Value>,
 }
 
 impl<'m> Evaluator<'m> {
@@ -46,12 +46,8 @@ impl<'m> Evaluator<'m> {
                 };
                 match &op_def.body {
                     Body::Body(ops) => self.eval_sentence(ops),
-                    Body::Constructor(data_name) => {
+                    Body::Constructor(_) => {
                         let constr_name = op_name;
-                        let data_def = self.module.data_defs.get(data_name).expect(&format!(
-                            "type checker seems to have missed an undefined data def: {}",
-                            data_name
-                        ));
                         let args = op_def
                             .ann
                             .pre
@@ -62,8 +58,7 @@ impl<'m> Evaluator<'m> {
                                 )
                             })
                             .collect();
-                        let value = Value {
-                            data_def,
+                        let value = Value::User {
                             constr_name: constr_name.clone(),
                             args,
                         };
@@ -72,22 +67,20 @@ impl<'m> Evaluator<'m> {
                 }
             }
             Op::Case(head_arm, rest_arms) => {
-                let matched_value = self
-                    .stack
-                    .pop()
-                    .expect("type checker seems to have missed a stack underflow error");
+                let Value::User { constr_name, args } =
+                    self.stack.pop().expect("stack underflow error")
+                else {
+                    panic!("matching a quote value")
+                };
                 let matching_arm = vec![head_arm]
                     .into_iter()
                     .chain(rest_arms.iter())
-                    .find(|arm| &arm.constr == &matched_value.constr_name)
-                    .expect(&format!(
-                        "type checker seems to have missed an unknown constructor: {}",
-                        &matched_value.constr_name
-                    ));
-                self.stack.extend(matched_value.args.into_iter().rev());
+                    .find(|arm| &arm.constr == &constr_name)
+                    .expect(&format!("unknown constructor: {}", &constr_name));
+                self.stack.extend(args.into_iter().rev());
                 self.eval_sentence(&matching_arm.body);
             }
-            Op::Quote(vec) => todo!(),
+            Op::Quote(ops) => self.stack.push(Value::Quote { ops: ops.clone() }),
         }
     }
 }
@@ -117,22 +110,18 @@ mod tests {
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
         evaluator.eval_main().unwrap();
-        let data_def = module.data_defs.get("Foo").unwrap();
         assert_eq!(
             evaluator.stack,
             vec![
-                Value {
-                    data_def,
+                Value::User {
                     constr_name: "foo".to_owned(),
                     args: vec![]
                 },
-                Value {
-                    data_def,
+                Value::User {
                     constr_name: "bar".to_owned(),
                     args: vec![]
                 },
-                Value {
-                    data_def,
+                Value::User {
                     constr_name: "baz".to_owned(),
                     args: vec![]
                 },
@@ -149,20 +138,15 @@ mod tests {
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
         evaluator.eval_main().unwrap();
-        let data_def = module.data_defs.get("Nat").unwrap();
         assert_eq!(
             evaluator.stack,
-            vec![Value {
-                data_def,
+            vec![Value::User {
                 constr_name: "suc".to_owned(),
-                args: vec![Value {
-                    data_def,
+                args: vec![Value::User {
                     constr_name: "suc".to_owned(),
-                    args: vec![Value {
-                        data_def,
+                    args: vec![Value::User {
                         constr_name: "suc".to_owned(),
-                        args: vec![Value {
-                            data_def,
+                        args: vec![Value::User {
                             constr_name: "zero".to_owned(),
                             args: vec![]
                         }]
@@ -183,20 +167,15 @@ mod tests {
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
         evaluator.eval_main().unwrap();
-        let data_def = module.data_defs.get("Nat").unwrap();
         assert_eq!(
             evaluator.stack,
-            vec![Value {
-                data_def,
+            vec![Value::User {
                 constr_name: "suc".to_owned(),
-                args: vec![Value {
-                    data_def,
+                args: vec![Value::User {
                     constr_name: "suc".to_owned(),
-                    args: vec![Value {
-                        data_def,
+                    args: vec![Value::User {
                         constr_name: "suc".to_owned(),
-                        args: vec![Value {
-                            data_def,
+                        args: vec![Value::User {
                             constr_name: "zero".to_owned(),
                             args: vec![]
                         }]
@@ -216,22 +195,18 @@ mod tests {
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
         evaluator.eval_main().unwrap();
-        let data_def = module.data_defs.get("Foo").unwrap();
         assert_eq!(
             evaluator.stack,
             vec![
-                Value {
-                    data_def,
+                Value::User {
                     constr_name: "foo".to_owned(),
                     args: vec![]
                 },
-                Value {
-                    data_def,
+                Value::User {
                     constr_name: "bar".to_owned(),
                     args: vec![]
                 },
-                Value {
-                    data_def,
+                Value::User {
                     constr_name: "baz".to_owned(),
                     args: vec![]
                 },
