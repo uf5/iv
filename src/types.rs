@@ -10,17 +10,48 @@ impl Module {
     /// Creates a new module with the constructors of the user defined data types mirrored as op definitions.
     pub fn new(data_defs: HashMap<String, DataDef>, op_defs: HashMap<String, OpDef>) -> Self {
         let op_defs = {
-            // prelude
-            let prelude = vec![(
-                String::from("dup"),
-                OpDef {
-                    ann: OpType {
-                        pre: vec![Type::Poly(String::from("a"))],
-                        post: vec![Type::Poly(String::from("a")), Type::Poly(String::from("a"))],
+            // prelude with fixed-length arguments
+            let prelude_fixed = vec![
+                (
+                    String::from("dup"),
+                    OpDef {
+                        ann: OpType {
+                            pre: vec![Type::Poly(String::from("a"))],
+                            post: vec![
+                                Type::Poly(String::from("a")),
+                                Type::Poly(String::from("a")),
+                            ],
+                        },
+                        body: Body::Primitive,
                     },
-                    body: Body::Primitive,
-                },
-            )]
+                ),
+                (
+                    String::from("swap"),
+                    OpDef {
+                        ann: OpType {
+                            pre: vec![Type::Poly(String::from("a")), Type::Poly(String::from("b"))],
+                            post: vec![
+                                Type::Poly(String::from("b")),
+                                Type::Poly(String::from("a")),
+                            ],
+                        },
+                        body: Body::Primitive,
+                    },
+                ),
+                (
+                    String::from("quote"),
+                    OpDef {
+                        ann: OpType {
+                            pre: vec![Type::Poly(String::from("a"))],
+                            post: vec![Type::Op(OpType {
+                                pre: vec![],
+                                post: vec![Type::Poly(String::from("a"))],
+                            })],
+                        },
+                        body: Body::Primitive,
+                    },
+                ),
+            ]
             .into_iter();
             // user defined ops
             let op_defs = op_defs.into_iter();
@@ -56,7 +87,7 @@ impl Module {
                         })
                 },
             );
-            prelude.chain(op_defs).chain(constr_defs).collect()
+            prelude_fixed.chain(op_defs).chain(constr_defs).collect()
         };
         Module { data_defs, op_defs }
     }
