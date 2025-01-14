@@ -64,6 +64,9 @@ impl<'m> Evaluator<'m> {
                         };
                         self.stack.push(value);
                     }
+                    Body::Primitive => {
+                        todo!()
+                    }
                 }
             }
             Op::Case(head_arm, rest_arms) => {

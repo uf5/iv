@@ -10,6 +10,18 @@ impl Module {
     /// Creates a new module with the constructors of the user defined data types mirrored as op definitions.
     pub fn new(data_defs: HashMap<String, DataDef>, op_defs: HashMap<String, OpDef>) -> Self {
         let op_defs = {
+            // prelude
+            let prelude = vec![(
+                String::from("dup"),
+                OpDef {
+                    ann: OpType {
+                        pre: vec![Type::Poly(String::from("a"))],
+                        post: vec![Type::Poly(String::from("a")), Type::Poly(String::from("a"))],
+                    },
+                    body: Body::Primitive,
+                },
+            )]
+            .into_iter();
             // user defined ops
             let op_defs = op_defs.into_iter();
             // constructors as ops
@@ -44,7 +56,7 @@ impl Module {
                         })
                 },
             );
-            op_defs.chain(constr_defs).collect()
+            prelude.chain(op_defs).chain(constr_defs).collect()
         };
         Module { data_defs, op_defs }
     }
@@ -94,6 +106,7 @@ pub struct OpDef {
 pub enum Body {
     Body(Vec<Op>),
     Constructor(String),
+    Primitive,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

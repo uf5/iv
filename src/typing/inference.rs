@@ -93,6 +93,7 @@ impl<'m> Inference<'m> {
                 continue;
             }
             let Body::Body(ref body) = op_def.body else {
+                // skip constructors and primitives
                 continue;
             };
             let inf = self.infer(&body)?;
