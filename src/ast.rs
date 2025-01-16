@@ -1,3 +1,4 @@
+use crate::typing::types::*;
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -102,29 +103,6 @@ pub struct DataDef {
 #[derive(Debug, PartialEq, Eq)]
 pub struct DataConstr {
     pub params: Vec<Type>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Type {
-    Mono(String),
-    Poly(String),
-    Op(OpType),
-    App(Box<Type>, Box<Type>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpType {
-    pub pre: Vec<Type>,
-    pub post: Vec<Type>,
-}
-
-impl OpType {
-    pub fn empty() -> Self {
-        OpType {
-            pre: vec![],
-            post: vec![],
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

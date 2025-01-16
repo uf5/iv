@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::zip;
 
-use crate::types::*;
+use super::types::*;
+use crate::ast::*;
 
 #[derive(Debug)]
 pub enum InferenceError {

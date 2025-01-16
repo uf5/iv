@@ -4,7 +4,7 @@ mod lexer;
 mod tokens;
 lalrpop_mod!(parser, "/syntax/parser.rs");
 
-use super::types::Module;
+use super::ast::Module;
 use lexer::Lexer;
 use parser::IVParser;
 
