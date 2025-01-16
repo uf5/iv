@@ -1,10 +1,11 @@
 use lalrpop_util::lalrpop_mod;
 
+pub mod ast;
 mod lexer;
 mod tokens;
 lalrpop_mod!(parser, "/syntax/parser.rs");
 
-use super::ast::Module;
+use ast::Module;
 use lexer::Lexer;
 use parser::IVParser;
 

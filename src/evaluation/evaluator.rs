@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::ast::*;
+use crate::syntax::ast::*;
 
 pub struct Evaluator<'m> {
     module: &'m Module,

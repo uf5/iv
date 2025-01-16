@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::iter::zip;
 
 use super::types::*;
-use crate::ast::*;
+use crate::syntax::ast::*;
 
 #[derive(Debug)]
 pub enum InferenceError {

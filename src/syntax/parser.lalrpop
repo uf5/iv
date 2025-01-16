@@ -1,5 +1,5 @@
 use crate::typing::types::*;
-use crate::ast::*;
+use crate::syntax::ast::*;
 use super::tokens::*;
 use std::collections::HashMap;
 

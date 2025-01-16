@@ -1,4 +1,4 @@
-use crate::ast::*;
+use crate::syntax::ast::*;
 
 #[derive(Debug)]
 pub enum EvaluatorError {
