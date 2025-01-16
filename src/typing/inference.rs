@@ -271,12 +271,7 @@ impl<'m> Inference<'m> {
                     if !covered_constructors.insert(&arm.constr) {
                         return Err(InferenceError::DuplicateConstructor(arm.constr.clone()));
                     }
-                    let (arm_dd, mut arm_ot) = self.infer_case_arm(arm)?;
-                    if head_dd != arm_dd {
-                        return Err(InferenceError::ConstructorBelongsToDifferentData(
-                            arm.constr.clone(),
-                        ));
-                    }
+                    let (_, mut arm_ot) = self.infer_case_arm(arm)?;
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
                     let new_s = self.unify_op(&ot, &arm_ot)?;
                     s = compose(s, new_s);

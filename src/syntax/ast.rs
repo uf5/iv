@@ -1,7 +1,7 @@
 use crate::typing::types::*;
 use std::collections::HashMap;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Module {
     pub data_defs: HashMap<String, DataDef>,
     pub op_defs: HashMap<String, OpDef>,
@@ -94,31 +94,31 @@ impl Module {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct DataDef {
     pub params: Vec<String>,
     pub constrs: HashMap<String, DataConstr>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct DataConstr {
     pub params: Vec<Type>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct OpDef {
     pub ann: OpType,
     pub body: Body,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Body {
     Body(Vec<Op>),
     Constructor(String),
     Primitive,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Op {
     Literal(Literal),
     Name(String),
@@ -126,12 +126,12 @@ pub enum Op {
     Case(CaseArm, Vec<CaseArm>),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     Int(i32),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub struct CaseArm {
     pub constr: String,
     pub body: Vec<Op>,

@@ -6,7 +6,7 @@ pub enum EvaluatorError {
     MainIsAConstructor,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Value {
     User {
         constr_name: String,

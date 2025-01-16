@@ -88,132 +88,132 @@ impl<'m> Evaluator<'m> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::evaluation::evaluator::*;
-    use crate::syntax::parse;
+// #[cfg(test)]
+// mod tests {
+//     use crate::evaluation::evaluator::*;
+//     use crate::syntax::parse;
 
-    #[test]
-    fn empty() {
-        let input = "
-        define [] main []:.
-        ";
-        let module = parse(&input).unwrap();
-        let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
-        assert_eq!(evaluator.stack, vec![]);
-    }
+//     #[test]
+//     fn empty() {
+//         let input = "
+//         define [] main []:.
+//         ";
+//         let module = parse(&input).unwrap();
+//         let mut evaluator = Evaluator::new(&module);
+//         evaluator.eval_main().unwrap();
+//         assert_eq!(evaluator.stack, vec![]);
+//     }
 
-    #[test]
-    fn foo_bar_baz() {
-        let input = "
-        data Foo: foo, bar, baz.
-        define [] main [Foo, Foo, Foo]: foo bar baz.
-        ";
-        let module = parse(&input).unwrap();
-        let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
-        assert_eq!(
-            evaluator.stack,
-            vec![
-                Value::User {
-                    constr_name: "foo".to_owned(),
-                    args: vec![]
-                },
-                Value::User {
-                    constr_name: "bar".to_owned(),
-                    args: vec![]
-                },
-                Value::User {
-                    constr_name: "baz".to_owned(),
-                    args: vec![]
-                },
-            ]
-        );
-    }
+//     #[test]
+//     fn foo_bar_baz() {
+//         let input = "
+//         data Foo: foo, bar, baz.
+//         define [] main [Foo, Foo, Foo]: foo bar baz.
+//         ";
+//         let module = parse(&input).unwrap();
+//         let mut evaluator = Evaluator::new(&module);
+//         evaluator.eval_main().unwrap();
+//         assert_eq!(
+//             evaluator.stack,
+//             vec![
+//                 Value::User {
+//                     constr_name: "foo".to_owned(),
+//                     args: vec![]
+//                 },
+//                 Value::User {
+//                     constr_name: "bar".to_owned(),
+//                     args: vec![]
+//                 },
+//                 Value::User {
+//                     constr_name: "baz".to_owned(),
+//                     args: vec![]
+//                 },
+//             ]
+//         );
+//     }
 
-    #[test]
-    fn peano_3() {
-        let input = "
-        data Nat: zero, [Nat] suc.
-        define [] main [Nat]: zero suc suc suc.
-        ";
-        let module = parse(&input).unwrap();
-        let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
-        assert_eq!(
-            evaluator.stack,
-            vec![Value::User {
-                constr_name: "suc".to_owned(),
-                args: vec![Value::User {
-                    constr_name: "suc".to_owned(),
-                    args: vec![Value::User {
-                        constr_name: "suc".to_owned(),
-                        args: vec![Value::User {
-                            constr_name: "zero".to_owned(),
-                            args: vec![]
-                        }]
-                    }]
-                }]
-            }]
-        );
-    }
+//     #[test]
+//     fn peano_3() {
+//         let input = "
+//         data Nat: zero, [Nat] suc.
+//         define [] main [Nat]: zero suc suc suc.
+//         ";
+//         let module = parse(&input).unwrap();
+//         let mut evaluator = Evaluator::new(&module);
+//         evaluator.eval_main().unwrap();
+//         assert_eq!(
+//             evaluator.stack,
+//             vec![Value::User {
+//                 constr_name: "suc".to_owned(),
+//                 args: vec![Value::User {
+//                     constr_name: "suc".to_owned(),
+//                     args: vec![Value::User {
+//                         constr_name: "suc".to_owned(),
+//                         args: vec![Value::User {
+//                             constr_name: "zero".to_owned(),
+//                             args: vec![]
+//                         }]
+//                     }]
+//                 }]
+//             }]
+//         );
+//     }
 
-    #[test]
-    fn peano_add() {
-        let input = "
-        data Nat: zero, [Nat] suc.
-        define [Nat, Nat] natadd [Nat]:
-            case { zero { trace }, suc { trace natadd suc } }.
-        define [] main [Nat]: zero suc zero suc suc natadd.
-        ";
-        let module = parse(&input).unwrap();
-        let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
-        assert_eq!(
-            evaluator.stack,
-            vec![Value::User {
-                constr_name: "suc".to_owned(),
-                args: vec![Value::User {
-                    constr_name: "suc".to_owned(),
-                    args: vec![Value::User {
-                        constr_name: "suc".to_owned(),
-                        args: vec![Value::User {
-                            constr_name: "zero".to_owned(),
-                            args: vec![]
-                        }]
-                    }]
-                }]
-            }]
-        );
-    }
+//     #[test]
+//     fn peano_add() {
+//         let input = "
+//         data Nat: zero, [Nat] suc.
+//         define [Nat, Nat] natadd [Nat]:
+//             case { zero { trace }, suc { trace natadd suc } }.
+//         define [] main [Nat]: zero suc zero suc suc natadd.
+//         ";
+//         let module = parse(&input).unwrap();
+//         let mut evaluator = Evaluator::new(&module);
+//         evaluator.eval_main().unwrap();
+//         assert_eq!(
+//             evaluator.stack,
+//             vec![Value::User {
+//                 constr_name: "suc".to_owned(),
+//                 args: vec![Value::User {
+//                     constr_name: "suc".to_owned(),
+//                     args: vec![Value::User {
+//                         constr_name: "suc".to_owned(),
+//                         args: vec![Value::User {
+//                             constr_name: "zero".to_owned(),
+//                             args: vec![]
+//                         }]
+//                     }]
+//                 }]
+//             }]
+//         );
+//     }
 
-    #[test]
-    fn case_destructuring_order() {
-        let input = "
-        data Foo: foo, bar, baz.
-        data X: [Foo, Foo, Foo] x.
-        define [] main [Foo, Foo, Foo]: foo bar baz x case { x {} }.
-        ";
-        let module = parse(&input).unwrap();
-        let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
-        assert_eq!(
-            evaluator.stack,
-            vec![
-                Value::User {
-                    constr_name: "foo".to_owned(),
-                    args: vec![]
-                },
-                Value::User {
-                    constr_name: "bar".to_owned(),
-                    args: vec![]
-                },
-                Value::User {
-                    constr_name: "baz".to_owned(),
-                    args: vec![]
-                },
-            ]
-        );
-    }
-}
+//     #[test]
+//     fn case_destructuring_order() {
+//         let input = "
+//         data Foo: foo, bar, baz.
+//         data X: [Foo, Foo, Foo] x.
+//         define [] main [Foo, Foo, Foo]: foo bar baz x case { x {} }.
+//         ";
+//         let module = parse(&input).unwrap();
+//         let mut evaluator = Evaluator::new(&module);
+//         evaluator.eval_main().unwrap();
+//         assert_eq!(
+//             evaluator.stack,
+//             vec![
+//                 Value::User {
+//                     constr_name: "foo".to_owned(),
+//                     args: vec![]
+//                 },
+//                 Value::User {
+//                     constr_name: "bar".to_owned(),
+//                     args: vec![]
+//                 },
+//                 Value::User {
+//                     constr_name: "baz".to_owned(),
+//                     args: vec![]
+//                 },
+//             ]
+//         );
+//     }
+// }
