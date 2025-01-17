@@ -88,132 +88,140 @@ impl<'m> Evaluator<'m> {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::evaluation::evaluator::*;
-//     use crate::syntax::parse;
+#[cfg(test)]
+mod tests {
+    use crate::evaluation::evaluator::*;
+    use crate::syntax::parse;
 
-//     #[test]
-//     fn empty() {
-//         let input = "
-//         define [] main []:.
-//         ";
-//         let module = parse(&input).unwrap();
-//         let mut evaluator = Evaluator::new(&module);
-//         evaluator.eval_main().unwrap();
-//         assert_eq!(evaluator.stack, vec![]);
-//     }
+    #[test]
+    fn empty() {
+        let input = "
+        define [] main []:.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main().unwrap();
+        assert!(matches!(evaluator.stack[..], []))
+    }
 
-//     #[test]
-//     fn foo_bar_baz() {
-//         let input = "
-//         data Foo: foo, bar, baz.
-//         define [] main [Foo, Foo, Foo]: foo bar baz.
-//         ";
-//         let module = parse(&input).unwrap();
-//         let mut evaluator = Evaluator::new(&module);
-//         evaluator.eval_main().unwrap();
-//         assert_eq!(
-//             evaluator.stack,
-//             vec![
-//                 Value::User {
-//                     constr_name: "foo".to_owned(),
-//                     args: vec![]
-//                 },
-//                 Value::User {
-//                     constr_name: "bar".to_owned(),
-//                     args: vec![]
-//                 },
-//                 Value::User {
-//                     constr_name: "baz".to_owned(),
-//                     args: vec![]
-//                 },
-//             ]
-//         );
-//     }
+    #[test]
+    fn foo_bar_baz() {
+        let input = "
+        data Foo: foo, bar, baz.
+        define [] main [Foo, Foo, Foo]: foo bar baz.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main().unwrap();
+        assert!(matches!(
+            evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+                Value::User { constr_name: ref name3, args: ref args3 },
+            ] if name1 == "foo" && args1.is_empty() &&
+                 name2 == "bar" && args2.is_empty() &&
+                 name3 == "baz" && args3.is_empty()
+        ));
+    }
 
-//     #[test]
-//     fn peano_3() {
-//         let input = "
-//         data Nat: zero, [Nat] suc.
-//         define [] main [Nat]: zero suc suc suc.
-//         ";
-//         let module = parse(&input).unwrap();
-//         let mut evaluator = Evaluator::new(&module);
-//         evaluator.eval_main().unwrap();
-//         assert_eq!(
-//             evaluator.stack,
-//             vec![Value::User {
-//                 constr_name: "suc".to_owned(),
-//                 args: vec![Value::User {
-//                     constr_name: "suc".to_owned(),
-//                     args: vec![Value::User {
-//                         constr_name: "suc".to_owned(),
-//                         args: vec![Value::User {
-//                             constr_name: "zero".to_owned(),
-//                             args: vec![]
-//                         }]
-//                     }]
-//                 }]
-//             }]
-//         );
-//     }
+    #[test]
+    fn peano_3() {
+        let input = "
+        data Nat: zero, [Nat] suc.
+        define [] main [Nat]: zero suc suc suc.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main().unwrap();
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 }
+            ] if name1 == "suc" && matches!(
+                &args1[..],
+                [
+                    Value::User { constr_name: ref name2, args: ref args2 }
+                ] if name2 == "suc" && matches!(
+                    &args2[..],
+                    [
+                        Value::User { constr_name: ref name3, args: ref args3 }
+                    ] if name3 == "suc" && matches!(
+                        &args3[..],
+                        [
+                            Value::User { constr_name: ref name4, args: ref args4 }
+                        ] if name4 == "zero" && args4.is_empty()
+                    )
+                )
+            )
+        ));
+    }
 
-//     #[test]
-//     fn peano_add() {
-//         let input = "
-//         data Nat: zero, [Nat] suc.
-//         define [Nat, Nat] natadd [Nat]:
-//             case { zero { trace }, suc { trace natadd suc } }.
-//         define [] main [Nat]: zero suc zero suc suc natadd.
-//         ";
-//         let module = parse(&input).unwrap();
-//         let mut evaluator = Evaluator::new(&module);
-//         evaluator.eval_main().unwrap();
-//         assert_eq!(
-//             evaluator.stack,
-//             vec![Value::User {
-//                 constr_name: "suc".to_owned(),
-//                 args: vec![Value::User {
-//                     constr_name: "suc".to_owned(),
-//                     args: vec![Value::User {
-//                         constr_name: "suc".to_owned(),
-//                         args: vec![Value::User {
-//                             constr_name: "zero".to_owned(),
-//                             args: vec![]
-//                         }]
-//                     }]
-//                 }]
-//             }]
-//         );
-//     }
+    #[test]
+    fn peano_add() {
+        let input = "
+        data Nat: zero, [Nat] suc.
+        define [Nat, Nat] natadd [Nat]:
+            case { zero { trace }, suc { trace natadd suc } }.
+        define [] main [Nat]: zero suc zero suc suc natadd.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main().unwrap();
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User {
+                    constr_name: ref name1,
+                    args: ref args1
+                }
+            ] if name1 == "suc" && matches!(
+                &args1[..],
+                [
+                    Value::User {
+                        constr_name: ref name2,
+                        args: ref args2
+                    }
+                ] if name2 == "suc" && matches!(
+                    &args2[..],
+                    [
+                        Value::User {
+                            constr_name: ref name3,
+                            args: ref args3
+                        }
+                    ] if name3 == "suc" && matches!(
+                        &args3[..],
+                        [
+                            Value::User {
+                                constr_name: ref name4,
+                                args: ref args4
+                            }
+                        ] if name4 == "zero" && args4.is_empty()
+                    )
+                )
+            )
+        ));
+    }
 
-//     #[test]
-//     fn case_destructuring_order() {
-//         let input = "
-//         data Foo: foo, bar, baz.
-//         data X: [Foo, Foo, Foo] x.
-//         define [] main [Foo, Foo, Foo]: foo bar baz x case { x {} }.
-//         ";
-//         let module = parse(&input).unwrap();
-//         let mut evaluator = Evaluator::new(&module);
-//         evaluator.eval_main().unwrap();
-//         assert_eq!(
-//             evaluator.stack,
-//             vec![
-//                 Value::User {
-//                     constr_name: "foo".to_owned(),
-//                     args: vec![]
-//                 },
-//                 Value::User {
-//                     constr_name: "bar".to_owned(),
-//                     args: vec![]
-//                 },
-//                 Value::User {
-//                     constr_name: "baz".to_owned(),
-//                     args: vec![]
-//                 },
-//             ]
-//         );
-//     }
-// }
+    #[test]
+    fn case_destructuring_order() {
+        let input = "
+        data Foo: foo, bar, baz.
+        data X: [Foo, Foo, Foo] x.
+        define [] main [Foo, Foo, Foo]: foo bar baz x case { x {} }.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main().unwrap();
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+                Value::User { constr_name: ref name3, args: ref args3 },
+            ] if name1 == "foo" && args1.is_empty() &&
+                 name2 == "bar" && args2.is_empty() &&
+                 name3 == "baz" && args3.is_empty()
+        ));
+    }
+}
