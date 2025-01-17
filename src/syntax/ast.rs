@@ -17,44 +17,11 @@ pub struct ConstrInfo {
 pub struct Module {
     pub data_defs: HashMap<String, DataDef>,
     pub op_defs: HashMap<String, OpDef>,
-    pub constructor_info: HashMap<String, ConstrInfo>,
 }
 
 impl Module {
     pub fn new(data_defs: HashMap<String, DataDef>, op_defs: HashMap<String, OpDef>) -> Self {
-        let constructor_info = data_defs
-            .iter()
-            .flat_map(|(data_name, data_def)| {
-                let constructed_mono = Type::Mono(data_name.to_owned());
-                let constructed_type = data_def
-                    .params
-                    .iter()
-                    .cloned()
-                    .fold(constructed_mono, |a, x| {
-                        Type::App(Box::new(a), Box::new(Type::Poly(x)))
-                    });
-                data_def
-                    .constrs
-                    .iter()
-                    .map(move |(constr_name, constr_def)| {
-                        (
-                            constr_name.clone(),
-                            ConstrInfo {
-                                associated_data: data_name.clone(),
-                                op_type: OpType {
-                                    pre: constr_def.params.clone(),
-                                    post: vec![constructed_type.clone()],
-                                },
-                            },
-                        )
-                    })
-            })
-            .collect();
-        Module {
-            data_defs,
-            op_defs,
-            constructor_info,
-        }
+        Module { data_defs, op_defs }
     }
 }
 

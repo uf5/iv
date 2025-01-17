@@ -83,12 +83,38 @@ impl Typeable for OpType {
 
 pub struct Inference<'m> {
     pub module: &'m Module,
+    constr_data_def_map: HashMap<&'m str, &'m DataDef>,
+    constr_optype_map: HashMap<&'m str, OpType>,
     counter: usize,
 }
 
 impl<'m> Inference<'m> {
     pub fn new(module: &'m Module) -> Self {
-        Inference { module, counter: 0 }
+        let mut constr_data_def_map = HashMap::new();
+        let mut constr_optype = HashMap::new();
+        for (data_name, data_def) in module.data_defs.iter() {
+            for (constr_name, constr_def) in data_def.constrs.iter() {
+                constr_data_def_map.insert(constr_name.as_str(), data_def);
+                let constructed_type = data_def
+                    .params
+                    .iter()
+                    .map(|p| Type::Poly(p.to_owned()))
+                    .fold(Type::Mono(data_name.to_owned()), |a, x| {
+                        Type::App(Box::new(a), Box::new(x))
+                    });
+                let optype = OpType {
+                    pre: constr_def.params.clone(),
+                    post: vec![constructed_type],
+                };
+                constr_optype.insert(constr_name.as_str(), optype);
+            }
+        }
+        Inference {
+            module,
+            constr_data_def_map,
+            constr_optype_map: constr_optype,
+            counter: 0,
+        }
     }
 
     pub fn typecheck(&mut self) -> Result<HashMap<String, OpType>, InferenceError> {
@@ -244,25 +270,21 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn infer_case_arm(
-        &mut self,
-        arm: &CaseArm,
-    ) -> Result<(&'m DataDef, OpType), InferenceErrorMessage> {
-        // find the constructor op type and the data def associated with the constructor
-        let ConstrInfo {
-            associated_data: data_def_name,
-            op_type: constr_ot,
-        } = self
-            .module
-            .constructor_info
-            .get(&arm.constr)
-            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(arm.constr.to_owned()))?;
-        let data_def = self
-            .module
-            .data_defs
-            .get(data_def_name)
-            .expect("broken constructor info");
-        // infer the op type of the body
+    fn lookup_constructor_optype(&self, name: &str) -> Result<OpType, InferenceErrorMessage> {
+        self.constr_optype_map
+            .get(name)
+            .cloned()
+            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
+    }
+
+    fn lookup_constructor_data_def(&self, name: &str) -> Result<&&DataDef, InferenceErrorMessage> {
+        self.constr_data_def_map
+            .get(name)
+            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
+    }
+
+    fn infer_case_arm(&mut self, arm: &CaseArm) -> Result<OpType, InferenceErrorMessage> {
+        let constr_ot = self.lookup_constructor_optype(arm.constr.as_str())?;
         let body_optype = self.infer(&arm.body).map_err(|error| error.error)?;
         // create a destructor from the constructor op type and instantiate it
         let destr = Self::make_destr(&constr_ot);
@@ -270,21 +292,18 @@ impl<'m> Inference<'m> {
         // chain the destructor with the arm body to get the complete op type
         let (s, chained_optype) = self.chain(inst_destr, body_optype)?;
         let chained_optype_applied = chained_optype.apply(&s);
-        Ok((data_def, chained_optype_applied))
+        Ok(chained_optype_applied)
     }
 
-    fn prelude_optype(&self, name: &str) -> Option<OpType> {
+    fn get_prelude_optype(&self, name: &str) -> Option<OpType> {
         prelude_types::PRELUDE_OP_TYPES.get(name).cloned()
     }
 
-    fn constr_optype(&self, name: &str) -> Option<OpType> {
-        self.module
-            .constructor_info
-            .get(name)
-            .map(|info| info.op_type.clone())
+    fn get_constr_optype(&self, name: &str) -> Option<OpType> {
+        self.constr_optype_map.get(name).cloned()
     }
 
-    fn user_optype(&self, name: &str) -> Option<OpType> {
+    fn get_user_optype(&self, name: &str) -> Option<OpType> {
         self.module
             .op_defs
             .get(name)
@@ -294,9 +313,9 @@ impl<'m> Inference<'m> {
 
     fn lookup_op_optype(&self, name: &str) -> Option<OpType> {
         // lookup the prelude, constructors, user defined
-        self.prelude_optype(name)
-            .or_else(|| self.constr_optype(name))
-            .or_else(|| self.user_optype(name))
+        self.get_prelude_optype(name)
+            .or_else(|| self.get_constr_optype(name))
+            .or_else(|| self.get_user_optype(name))
     }
 
     fn infer_op(&mut self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
@@ -309,26 +328,32 @@ impl<'m> Inference<'m> {
                 Ok(self.instantiate_op(op_type))
             }
             Op::Case { head_arm, arms, .. } => {
-                let (head_dd, mut ot) = self.infer_case_arm(head_arm)?;
+                let head_constrs = self
+                    .lookup_constructor_data_def(head_arm.constr.as_str())?
+                    .constrs
+                    .keys()
+                    .cloned()
+                    .collect();
+                let mut head_ot = self.infer_case_arm(head_arm)?;
                 let mut covered_constructors = HashSet::new();
-                covered_constructors.insert(&head_arm.constr);
+                covered_constructors.insert(head_arm.constr.clone());
 
                 let mut s = Subst::new();
                 for arm in arms {
-                    if !covered_constructors.insert(&arm.constr) {
+                    if !covered_constructors.insert(arm.constr.clone()) {
                         return Err(InferenceErrorMessage::DuplicateConstructor(
                             arm.constr.clone(),
                         ));
                     }
-                    let (_, mut arm_ot) = self.infer_case_arm(arm)?;
-                    (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
-                    let new_s = self.unify_op(&ot, &arm_ot)?;
+                    let mut arm_ot = self.infer_case_arm(arm)?;
+                    (head_ot, arm_ot) = self.balance_op_stack_lengths(head_ot, arm_ot);
+                    let new_s = self.unify_op(&head_ot, &arm_ot)?;
                     s = compose(s, new_s);
-                    ot = ot.apply(&s);
+                    head_ot = head_ot.apply(&s);
                 }
 
-                if covered_constructors == head_dd.constrs.keys().collect() {
-                    Ok(ot)
+                if covered_constructors == head_constrs {
+                    Ok(head_ot)
                 } else {
                     Err(InferenceErrorMessage::NotAllConstructorsCovered)
                 }
