@@ -32,8 +32,8 @@ impl<'m> Evaluator<'m> {
 
     fn eval(&mut self, op: &Op) {
         match op {
-            Op::Literal(_) => todo!("no literals yet"),
-            Op::Name(op_name) => {
+            Op::Literal { .. } => todo!("no literals yet"),
+            Op::Name { value: op_name, .. } => {
                 if op_name == "trace" {
                     println!("tracing: {:?}", self.stack);
                     return;
@@ -69,7 +69,11 @@ impl<'m> Evaluator<'m> {
                     }
                 }
             }
-            Op::Case(head_arm, rest_arms) => {
+            Op::Case {
+                head_arm,
+                arms: rest_arms,
+                ..
+            } => {
                 let Value::User { constr_name, args } =
                     self.stack.pop().expect("stack underflow error")
                 else {
@@ -83,7 +87,7 @@ impl<'m> Evaluator<'m> {
                 self.stack.extend(args.into_iter().rev());
                 self.eval_sentence(&matching_arm.body);
             }
-            Op::Quote(ops) => self.stack.push(Value::Quote { ops: ops.clone() }),
+            Op::Quote { value: ops, .. } => self.stack.push(Value::Quote { ops: ops.clone() }),
         }
     }
 }

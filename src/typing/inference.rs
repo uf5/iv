@@ -252,8 +252,8 @@ impl<'m> Inference<'m> {
 
     fn infer_op(&mut self, op: &Op) -> Err<OpType> {
         match op {
-            Op::Literal(lit) => Ok(self.lit_optype(lit)),
-            Op::Name(n) => {
+            Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
+            Op::Name { value: n, .. } => {
                 let op_def = self
                     .module
                     .op_defs
@@ -261,7 +261,7 @@ impl<'m> Inference<'m> {
                     .ok_or_else(|| InferenceError::UnknownOp(n.clone()))?;
                 Ok(self.instantiate_op(&op_def.ann))
             }
-            Op::Case(head_arm, arms) => {
+            Op::Case { head_arm, arms, .. } => {
                 let (head_dd, mut ot) = self.infer_case_arm(head_arm)?;
                 let mut covered_constructors = HashSet::new();
                 covered_constructors.insert(&head_arm.constr);
@@ -284,7 +284,7 @@ impl<'m> Inference<'m> {
                     Err(InferenceError::NotAllConstructorsCovered)
                 }
             }
-            Op::Quote(ops) => {
+            Op::Quote { value: ops, .. } => {
                 let quoted_optype = self.infer(ops)?;
                 Ok(OpType {
                     pre: vec![],

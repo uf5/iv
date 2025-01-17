@@ -29,16 +29,17 @@ Defs: (HashMap<String, DataDef>, HashMap<String, OpDef>) = {
 };
 
 DataDef: (String, DataDef) = {
-    "data" <name:"uident"> <params:"lident"*> ":" <constrs:Comma<DataConstr>> "." => {
+    <start:@L> "data" <name:"uident"> <params:"lident"*> ":" <constrs:Comma<DataConstr>> "." <end:@R> => {
         let params = params.into_iter().map(|s| s.to_owned()).collect();
         let constrs = constrs.into_iter().collect();
-        (name.to_owned(), DataDef { params, constrs })
+	let span = Span { start, end };
+        (name.to_owned(), DataDef { params, constrs, span })
     },
 };
 
 DataConstr: (String, DataConstr) = {
-    <name:"lident"> => (name.to_owned(), DataConstr { params: vec![] }),
-    "[" <params:Comma<Type>> "]" <name:"lident"> => (name.to_owned(), DataConstr { params }),
+    <start:@L> <name:"lident"> <end:@R> => (name.to_owned(), DataConstr { params: vec![], span: Span { start, end } }),
+    <start:@L> "[" <params:Comma<Type>> "]" <name:"lident"> <end:@R> => (name.to_owned(), DataConstr { params, span: Span { start, end } }),
 };
 
 Type: Type = {
@@ -51,22 +52,25 @@ Type: Type = {
 };
 
 OpDef: (String, OpDef) = {
-    "define" "[" <pre:Comma<Type>> "]" <name:"lident"> "[" <post:Comma<Type>> "]" ":" <body:Op*> "." => {
+    <start:@L> "define" "[" <pre:Comma<Type>> "]" <name:"lident"> "[" <post:Comma<Type>> "]" ":" <body:Op*> "." <end:@R> => {
+        let span = Span { start, end };
         let ann = OpType { pre, post };
         let body = Body::Body(body);
-        (name.to_owned(), OpDef { ann, body })
+        (name.to_owned(), OpDef { ann, body, span })
     },
 };
 
 Op: Op = {
-    <lit:Literal> => Op::Literal(lit),
-    <name:"lident"> => Op::Name(name.to_owned()),
-    "(" <ops:Op*> ")" => Op::Quote(ops),
-    "case" "{" <head_arm:CaseArm> "}" => {
-        Op::Case(head_arm, vec![])
+    <start:@L> <lit:Literal> <end:@R> => Op::Literal { value: lit, span: Span { start, end } },
+    <start:@L> <name:"lident"> <end:@R> => Op::Name { value: name.to_owned(), span: Span { start, end } },
+    <start:@L> "(" <ops:Op*> ")" <end:@R> => Op::Quote { value: ops, span: Span { start, end } },
+    <start:@L> "case" "{" <head_arm:CaseArm> "}" <end:@R> => {
+        let span = Span { start, end };
+        Op::Case { head_arm, arms: vec![], span }
     },
-    "case" "{" <head_arm:CaseArm> "," <arms:Comma<CaseArm>> "}" => {
-        Op::Case(head_arm, arms)
+    <start:@L> "case" "{" <head_arm:CaseArm> "," <arms:Comma<CaseArm>> "}" <end:@R> => {
+        let span = Span { start, end };
+        Op::Case { head_arm, arms, span }
     },
 };
 
