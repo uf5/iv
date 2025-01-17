@@ -55,7 +55,7 @@ OpDef: (String, OpDef) = {
     <start:@L> "define" "[" <pre:Comma<Type>> "]" <name:"lident"> "[" <post:Comma<Type>> "]" ":" <body:Op*> "." <end:@R> => {
         let span = Span { start, end };
         let ann = OpType { pre, post };
-        let body = Body::Body(body);
+        let body = body;
         (name.to_owned(), OpDef { ann, body, span })
     },
 };

@@ -41,15 +41,8 @@ pub struct DataConstr {
 #[derive(Debug)]
 pub struct OpDef {
     pub ann: OpType,
-    pub body: Body,
+    pub body: Vec<Op>,
     pub span: Span,
-}
-
-#[derive(Debug)]
-pub enum Body {
-    Body(Vec<Op>),
-    Constructor(String),
-    Primitive,
 }
 
 #[derive(Debug, Clone)]

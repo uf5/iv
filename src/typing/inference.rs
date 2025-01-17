@@ -22,7 +22,6 @@ pub enum InferenceErrorMessage {
     UnknownConstructor(String),
     DuplicateConstructor(String),
     NotAllConstructorsCovered,
-    ConstructorBelongsToDifferentData(String),
 }
 
 type Subst = HashMap<String, Type>;
@@ -123,11 +122,7 @@ impl<'m> Inference<'m> {
             if op_name.starts_with("noc") {
                 continue;
             }
-            let Body::Body(ref body) = op_def.body else {
-                // skip constructors and primitives
-                continue;
-            };
-            let inf = self.infer(&body)?;
+            let inf = self.infer(&op_def.body)?;
             let foobar = self
                 .inf_vs_ann(inf, &op_def.ann)
                 .map_err(|error| InferenceError {

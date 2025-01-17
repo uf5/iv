@@ -3,6 +3,7 @@ use crate::syntax::ast::*;
 
 pub struct Evaluator<'m> {
     module: &'m Module,
+
     pub stack: Vec<Value>,
 }
 
@@ -18,10 +19,7 @@ impl<'m> Evaluator<'m> {
         let Some(main_op_def) = self.module.op_defs.get("main") else {
             return Err(EvaluatorError::NoMain);
         };
-        let Body::Body(main_body) = &main_op_def.body else {
-            return Err(EvaluatorError::MainIsAConstructor);
-        };
-        Ok(self.eval_sentence(main_body))
+        Ok(self.eval_sentence(&main_op_def.body))
     }
 
     fn eval_sentence(&mut self, ops: &[Op]) {
@@ -44,30 +42,7 @@ impl<'m> Evaluator<'m> {
                         op_name
                     )
                 };
-                match &op_def.body {
-                    Body::Body(ops) => self.eval_sentence(ops),
-                    Body::Constructor(_) => {
-                        let constr_name = op_name;
-                        let args = op_def
-                            .ann
-                            .pre
-                            .iter()
-                            .map(|_| {
-                                self.stack.pop().expect(
-                                    "type checker seems to have missed a stack underflow error",
-                                )
-                            })
-                            .collect();
-                        let value = Value::User {
-                            constr_name: constr_name.clone(),
-                            args,
-                        };
-                        self.stack.push(value);
-                    }
-                    Body::Primitive => {
-                        todo!()
-                    }
-                }
+                self.eval_sentence(&op_def.body);
             }
             Op::Case {
                 head_arm,

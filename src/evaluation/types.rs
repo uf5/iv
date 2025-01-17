@@ -3,7 +3,6 @@ use crate::syntax::ast::*;
 #[derive(Debug)]
 pub enum EvaluatorError {
     NoMain,
-    MainIsAConstructor,
 }
 
 #[derive(Debug)]
