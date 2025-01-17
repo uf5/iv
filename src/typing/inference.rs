@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::zip;
 
+use super::prelude_types;
 use super::types::*;
 use crate::syntax::ast::*;
 
@@ -19,7 +20,6 @@ pub enum InferenceErrorMessage {
     UnknownOp(String),
     ChainError,
     UnknownConstructor(String),
-    NotAConstructor(String),
     DuplicateConstructor(String),
     NotAllConstructorsCovered,
     ConstructorBelongsToDifferentData(String),
@@ -134,7 +134,7 @@ impl<'m> Inference<'m> {
         Type::Poly(name)
     }
 
-    fn instantiate_op(&mut self, op: &OpType) -> OpType {
+    fn instantiate_op(&mut self, op: OpType) -> OpType {
         let new_var_subst = op
             .ftv()
             .iter()
@@ -237,27 +237,6 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn get_constr_info(
-        &self,
-        arm: &CaseArm,
-    ) -> Result<(&'m OpType, &'m DataDef), InferenceErrorMessage> {
-        let op_def = self
-            .module
-            .op_defs
-            .get(&arm.constr)
-            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(arm.constr.to_owned()))?;
-        let Body::Constructor(data_name) = &op_def.body else {
-            return Err(InferenceErrorMessage::NotAConstructor(arm.constr.clone()));
-        };
-        let Some(data_def) = self.module.data_defs.get(data_name) else {
-            panic!(
-                "Check that the Module is created using the Module::new function. Check that the \
-                Module is not changed after initial creation during parsing."
-            );
-        };
-        Ok((&op_def.ann, &data_def))
-    }
-
     fn make_destr(constr: &OpType) -> OpType {
         OpType {
             pre: constr.post.clone(),
@@ -270,28 +249,64 @@ impl<'m> Inference<'m> {
         arm: &CaseArm,
     ) -> Result<(&'m DataDef, OpType), InferenceErrorMessage> {
         // find the constructor op type and the data def associated with the constructor
-        let (constr_ot, data_def) = self.get_constr_info(arm)?;
+        let ConstrInfo {
+            associated_data: data_def_name,
+            op_type: constr_ot,
+        } = self
+            .module
+            .constructor_info
+            .get(&arm.constr)
+            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(arm.constr.to_owned()))?;
+        let data_def = self
+            .module
+            .data_defs
+            .get(data_def_name)
+            .expect("broken constructor info");
         // infer the op type of the body
         let body_optype = self.infer(&arm.body).map_err(|error| error.error)?;
         // create a destructor from the constructor op type and instantiate it
-        let destr = Self::make_destr(constr_ot);
-        let inst_destr = self.instantiate_op(&destr);
+        let destr = Self::make_destr(&constr_ot);
+        let inst_destr = self.instantiate_op(destr);
         // chain the destructor with the arm body to get the complete op type
         let (s, chained_optype) = self.chain(inst_destr, body_optype)?;
         let chained_optype_applied = chained_optype.apply(&s);
         Ok((data_def, chained_optype_applied))
     }
 
+    fn prelude_optype(&self, name: &str) -> Option<OpType> {
+        prelude_types::PRELUDE_OP_TYPES.get(name).cloned()
+    }
+
+    fn constr_optype(&self, name: &str) -> Option<OpType> {
+        self.module
+            .constructor_info
+            .get(name)
+            .map(|info| info.op_type.clone())
+    }
+
+    fn user_optype(&self, name: &str) -> Option<OpType> {
+        self.module
+            .op_defs
+            .get(name)
+            .map(|op_def| &op_def.ann)
+            .cloned()
+    }
+
+    fn lookup_op_optype(&self, name: &str) -> Option<OpType> {
+        // lookup the prelude, constructors, user defined
+        self.prelude_optype(name)
+            .or_else(|| self.constr_optype(name))
+            .or_else(|| self.user_optype(name))
+    }
+
     fn infer_op(&mut self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
         match op {
             Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
             Op::Name { value: n, .. } => {
-                let op_def = self
-                    .module
-                    .op_defs
-                    .get(n)
+                let op_type = self
+                    .lookup_op_optype(n)
                     .ok_or_else(|| InferenceErrorMessage::UnknownOp(n.clone()))?;
-                Ok(self.instantiate_op(&op_def.ann))
+                Ok(self.instantiate_op(op_type))
             }
             Op::Case { head_arm, arms, .. } => {
                 let (head_dd, mut ot) = self.infer_case_arm(head_arm)?;
