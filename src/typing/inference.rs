@@ -6,7 +6,13 @@ use super::types::*;
 use crate::syntax::ast::*;
 
 #[derive(Debug)]
-pub enum InferenceError {
+pub struct InferenceError {
+    pub span: Span,
+    pub error: InferenceErrorMessage,
+}
+
+#[derive(Debug)]
+pub enum InferenceErrorMessage {
     AnnInfConflict(OpType, OpType),
     UnificationError(Type, Type),
     OccursCheckError(String, Type),
@@ -18,8 +24,6 @@ pub enum InferenceError {
     NotAllConstructorsCovered,
     ConstructorBelongsToDifferentData(String),
 }
-
-type Err<T> = Result<T, InferenceError>;
 
 type Subst = HashMap<String, Type>;
 
@@ -87,7 +91,7 @@ impl<'m> Inference<'m> {
         Inference { module, counter: 0 }
     }
 
-    pub fn typecheck(&mut self) -> Err<HashMap<String, OpType>> {
+    pub fn typecheck(&mut self) -> Result<HashMap<String, OpType>, InferenceError> {
         let mut inferred_map = HashMap::new();
         for (op_name, op_def) in self.module.op_defs.iter() {
             if op_name.starts_with("noc") {
@@ -98,20 +102,30 @@ impl<'m> Inference<'m> {
                 continue;
             };
             let inf = self.infer(&body)?;
-            let s = self.unify_op(&op_def.ann, &inf)?;
-            // ann matches the inf when all subs associated with ftv of annotation are poly
-            for v in op_def.ann.ftv().iter().filter_map(|t| s.get(t)) {
-                match v {
-                    Type::Poly(_) => (),
-                    _ => Err(InferenceError::AnnInfConflict(
-                        op_def.ann.clone(),
-                        inf.clone(),
-                    ))?,
-                }
-            }
-            inferred_map.insert(op_name.clone(), inf.apply(&s));
+            let foobar = self
+                .inf_vs_ann(inf, &op_def.ann)
+                .map_err(|error| InferenceError {
+                    error,
+                    span: op_def.span.clone(),
+                })?;
+            inferred_map.insert(op_name.to_owned(), foobar);
         }
         Ok(inferred_map)
+    }
+
+    fn inf_vs_ann(&mut self, inf: OpType, ann: &OpType) -> Result<OpType, InferenceErrorMessage> {
+        let s = self.unify_op(ann, &inf)?;
+        // ann matches the inf when all subs associated with ftv of annotation are poly
+        for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
+            match v {
+                Type::Poly(_) => (),
+                _ => Err(InferenceErrorMessage::AnnInfConflict(
+                    ann.clone(),
+                    inf.clone(),
+                ))?,
+            }
+        }
+        Ok(inf.apply(&s))
     }
 
     fn gen_name(&mut self) -> Type {
@@ -130,16 +144,20 @@ impl<'m> Inference<'m> {
     }
 
     /// Unify two types. t1 has priority over t2, i.e., (Poly(v), t) is picked over (t, Poly(v)).
-    fn unify(&mut self, t1: &Type, t2: &Type) -> Err<Subst> {
+    fn unify(&mut self, t1: &Type, t2: &Type) -> Result<Subst, InferenceErrorMessage> {
         match (t1, t2) {
             (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
-            (Type::Mono(_), Type::Mono(_)) => {
-                Err(InferenceError::UnificationError(t1.clone(), t2.clone()))
-            }
+            (Type::Mono(_), Type::Mono(_)) => Err(InferenceErrorMessage::UnificationError(
+                t1.clone(),
+                t2.clone(),
+            )),
             (Type::Poly(v1), Type::Poly(v2)) if v1 == v2 => Ok(Subst::new()),
             (Type::Poly(v), t) | (t, Type::Poly(v)) => {
                 if t.ftv().contains(v) {
-                    Err(InferenceError::OccursCheckError(v.clone(), t.clone()))
+                    Err(InferenceErrorMessage::OccursCheckError(
+                        v.clone(),
+                        t.clone(),
+                    ))
                 } else {
                     Ok(Subst::from([(v.clone(), t.clone())]))
                 }
@@ -150,20 +168,28 @@ impl<'m> Inference<'m> {
                 Ok(compose(s1, s2))
             }
             (Type::Op(o1), Type::Op(o2)) => self.unify_op(o1, o2),
-            (_, _) => Err(InferenceError::UnificationError(t1.clone(), t2.clone())),
+            (_, _) => Err(InferenceErrorMessage::UnificationError(
+                t1.clone(),
+                t2.clone(),
+            )),
         }
     }
 
     /// Performs unification on two slices.
     /// Performs min(l1.len(), l2.len()) unifications.
-    fn unify_list(&mut self, s: Subst, l1: &[Type], l2: &[Type]) -> Err<Subst> {
+    fn unify_list(
+        &mut self,
+        s: Subst,
+        l1: &[Type],
+        l2: &[Type],
+    ) -> Result<Subst, InferenceErrorMessage> {
         zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
             let s = self.unify(&t1.clone().apply(&s_acc), &t2.clone().apply(&s_acc))?;
             Ok(compose(s_acc, s))
         })
     }
 
-    fn unify_op(&mut self, o1: &OpType, o2: &OpType) -> Err<Subst> {
+    fn unify_op(&mut self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
         let (
             OpType {
                 pre: pre1,
@@ -176,7 +202,7 @@ impl<'m> Inference<'m> {
         ) = self.balance_op_stack_lengths(o1.clone(), o2.clone());
         // ensure that the two types have the same size of pre and post stacks
         if pre1.len() != pre2.len() || post1.len() != post2.len() {
-            return Err(InferenceError::UnificationError(
+            return Err(InferenceErrorMessage::UnificationError(
                 Type::Op(o1.clone()),
                 Type::Op(o2.clone()),
             ));
@@ -211,14 +237,17 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn get_constr_info(&self, arm: &CaseArm) -> Err<(&'m OpType, &'m DataDef)> {
+    fn get_constr_info(
+        &self,
+        arm: &CaseArm,
+    ) -> Result<(&'m OpType, &'m DataDef), InferenceErrorMessage> {
         let op_def = self
             .module
             .op_defs
             .get(&arm.constr)
-            .ok_or_else(|| InferenceError::UnknownConstructor(arm.constr.to_owned()))?;
+            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(arm.constr.to_owned()))?;
         let Body::Constructor(data_name) = &op_def.body else {
-            return Err(InferenceError::NotAConstructor(arm.constr.clone()));
+            return Err(InferenceErrorMessage::NotAConstructor(arm.constr.clone()));
         };
         let Some(data_def) = self.module.data_defs.get(data_name) else {
             panic!(
@@ -236,11 +265,14 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn infer_case_arm(&mut self, arm: &CaseArm) -> Err<(&'m DataDef, OpType)> {
+    fn infer_case_arm(
+        &mut self,
+        arm: &CaseArm,
+    ) -> Result<(&'m DataDef, OpType), InferenceErrorMessage> {
         // find the constructor op type and the data def associated with the constructor
         let (constr_ot, data_def) = self.get_constr_info(arm)?;
         // infer the op type of the body
-        let body_optype = self.infer(&arm.body)?;
+        let body_optype = self.infer(&arm.body).map_err(|error| error.error)?;
         // create a destructor from the constructor op type and instantiate it
         let destr = Self::make_destr(constr_ot);
         let inst_destr = self.instantiate_op(&destr);
@@ -250,7 +282,7 @@ impl<'m> Inference<'m> {
         Ok((data_def, chained_optype_applied))
     }
 
-    fn infer_op(&mut self, op: &Op) -> Err<OpType> {
+    fn infer_op(&mut self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
         match op {
             Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
             Op::Name { value: n, .. } => {
@@ -258,7 +290,7 @@ impl<'m> Inference<'m> {
                     .module
                     .op_defs
                     .get(n)
-                    .ok_or_else(|| InferenceError::UnknownOp(n.clone()))?;
+                    .ok_or_else(|| InferenceErrorMessage::UnknownOp(n.clone()))?;
                 Ok(self.instantiate_op(&op_def.ann))
             }
             Op::Case { head_arm, arms, .. } => {
@@ -269,7 +301,9 @@ impl<'m> Inference<'m> {
                 let mut s = Subst::new();
                 for arm in arms {
                     if !covered_constructors.insert(&arm.constr) {
-                        return Err(InferenceError::DuplicateConstructor(arm.constr.clone()));
+                        return Err(InferenceErrorMessage::DuplicateConstructor(
+                            arm.constr.clone(),
+                        ));
                     }
                     let (_, mut arm_ot) = self.infer_case_arm(arm)?;
                     (ot, arm_ot) = self.balance_op_stack_lengths(ot, arm_ot);
@@ -281,11 +315,11 @@ impl<'m> Inference<'m> {
                 if covered_constructors == head_dd.constrs.keys().collect() {
                     Ok(ot)
                 } else {
-                    Err(InferenceError::NotAllConstructorsCovered)
+                    Err(InferenceErrorMessage::NotAllConstructorsCovered)
                 }
             }
             Op::Quote { value: ops, .. } => {
-                let quoted_optype = self.infer(ops)?;
+                let quoted_optype = self.infer(ops).map_err(|error| error.error)?;
                 Ok(OpType {
                     pre: vec![],
                     post: vec![Type::Op(quoted_optype)],
@@ -295,7 +329,11 @@ impl<'m> Inference<'m> {
     }
 
     /// Chain two operator types through unification. This includes overflow and underflow chain.
-    fn chain(&mut self, ot1: OpType, ot2: OpType) -> Err<(Subst, OpType)> {
+    fn chain(
+        &mut self,
+        ot1: OpType,
+        ot2: OpType,
+    ) -> Result<(Subst, OpType), InferenceErrorMessage> {
         let OpType {
             pre: alpha,
             post: beta,
@@ -328,13 +366,19 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn infer_rest(&mut self, ops: &[Op]) -> Err<(Subst, OpType)> {
+    fn infer_rest(&mut self, ops: &[Op]) -> Result<(Subst, OpType), InferenceError> {
         match ops {
             [] => Ok((Subst::new(), OpType::empty())),
             [o, os @ ..] => {
-                let t1 = self.infer_op(o)?;
+                let t1 = self.infer_op(o).map_err(|error| InferenceError {
+                    error,
+                    span: o.get_span().clone(),
+                })?;
                 let (s2, t2) = self.infer_rest(os)?;
-                let (s3, t3) = self.chain(t1, t2)?;
+                let (s3, t3) = self.chain(t1, t2).map_err(|error| InferenceError {
+                    error,
+                    span: o.get_span().clone(),
+                })?;
                 let s = compose(s2, s3);
                 let t = t3.apply(&s);
                 Ok((s, t))
@@ -343,7 +387,7 @@ impl<'m> Inference<'m> {
     }
 
     /// Infer the type of a sentence
-    fn infer(&mut self, ops: &[Op]) -> Err<OpType> {
+    fn infer(&mut self, ops: &[Op]) -> Result<OpType, InferenceError> {
         let (_, op_type) = self.infer_rest(ops)?;
         Ok(op_type)
     }

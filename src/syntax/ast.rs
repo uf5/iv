@@ -67,6 +67,18 @@ pub enum Op {
     },
 }
 
+impl Op {
+    // TODO: smth like SpannedOp instead of this
+    pub fn get_span(&self) -> &Span {
+        match self {
+            Op::Literal { span, .. } => span,
+            Op::Name { span, .. } => span,
+            Op::Quote { span, .. } => span,
+            Op::Case { span, .. } => span,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Literal {
     Int(i32),
