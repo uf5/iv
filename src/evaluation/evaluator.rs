@@ -35,15 +35,11 @@ impl<'m> Evaluator<'m> {
             Op::Name { value: op_name, .. } => {
                 if op_name == "trace" {
                     println!("tracing: {:?}", self.stack);
-                    return;
-                }
-                let Some(op_def) = self.module.op_defs.get(op_name) else {
-                    panic!(
-                        "type checker seems to have missed an undefined operator: {}",
-                        op_name
-                    )
-                };
-                self.eval_sentence(&op_def.body);
+                } else if let Some(op_def) = self.module.op_defs.get(op_name) {
+                    self.eval_sentence(&op_def.body);
+                } else {
+		    panic!("unknown operator: {}", op_name);
+		}
             }
             Op::Case {
                 head_arm,

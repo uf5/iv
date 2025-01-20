@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use std::iter::zip;
 
 use super::prelude_types;
-use super::typed_ast::*;
 use super::types::*;
 use crate::syntax::ast::*;
+use crate::syntax::module_wrapper::ModuleConstrMaps;
 
 #[derive(Debug)]
 pub struct InferenceError {
@@ -81,21 +81,15 @@ impl Typeable for OpType {
     }
 }
 
-pub struct Inference<'m> {
-    pub module: &'m Module,
-    pub typed_module: TypedModule<'m>,
-    constr_data_def_map: HashMap<&'m str, &'m DataDef>,
-    constr_optype_map: HashMap<&'m str, OpType>,
-    counter: usize,
+struct ModuleConstrOpTypeMap<'m> {
+    pub constr_to_optype_map: HashMap<&'m str, OpType>,
 }
 
-impl<'m> Inference<'m> {
+impl<'m> ModuleConstrOpTypeMap<'m> {
     pub fn new(module: &'m Module) -> Self {
-        let mut constr_data_def_map = HashMap::new();
-        let mut constr_optype = HashMap::new();
+        let mut constr_to_optype_map = HashMap::new();
         for (data_name, data_def) in module.data_defs.iter() {
             for (constr_name, constr_def) in data_def.constrs.iter() {
-                constr_data_def_map.insert(constr_name.as_str(), data_def);
                 let constructed_type = data_def
                     .params
                     .iter()
@@ -107,19 +101,30 @@ impl<'m> Inference<'m> {
                     pre: constr_def.params.clone(),
                     post: vec![constructed_type],
                 };
-                constr_optype.insert(constr_name.as_str(), optype);
+                constr_to_optype_map.insert(constr_name.as_str(), optype);
             }
         }
-        let typed_module = TypedModule {
-            ast_module: module,
-            data_defs: HashMap::new(),
-            op_defs: HashMap::new(),
-        };
+        ModuleConstrOpTypeMap {
+            constr_to_optype_map,
+        }
+    }
+}
+
+pub struct Inference<'m> {
+    module: &'m Module,
+    constr_maps: ModuleConstrMaps<'m>,
+    optype_maps: ModuleConstrOpTypeMap<'m>,
+    counter: usize,
+}
+
+impl<'m> Inference<'m> {
+    pub fn new(module: &'m Module) -> Self {
+        let constr_maps = ModuleConstrMaps::new(module);
+        let optype_maps = ModuleConstrOpTypeMap::new(module);
         Inference {
             module,
-            typed_module,
-            constr_data_def_map,
-            constr_optype_map: constr_optype,
+            constr_maps,
+            optype_maps,
             counter: 0,
         }
     }
@@ -271,15 +276,18 @@ impl<'m> Inference<'m> {
     }
 
     fn lookup_constructor_optype(&self, name: &str) -> Result<OpType, InferenceErrorMessage> {
-        self.constr_optype_map
+        self.optype_maps
+            .constr_to_optype_map
             .get(name)
             .cloned()
             .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
     }
 
     fn lookup_constructor_data_def(&self, name: &str) -> Result<&&DataDef, InferenceErrorMessage> {
-        self.constr_data_def_map
+        self.constr_maps
+            .constr_to_data_map
             .get(name)
+            .map(|(_data_name, data_def)| data_def)
             .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
     }
 
@@ -300,7 +308,7 @@ impl<'m> Inference<'m> {
     }
 
     fn get_constr_optype(&self, name: &str) -> Option<OpType> {
-        self.constr_optype_map.get(name).cloned()
+        self.optype_maps.constr_to_optype_map.get(name).cloned()
     }
 
     fn get_user_optype(&self, name: &str) -> Option<OpType> {

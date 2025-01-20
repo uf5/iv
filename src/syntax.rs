@@ -1,6 +1,7 @@
 use lalrpop_util::lalrpop_mod;
 
 pub mod ast;
+pub mod module_wrapper;
 mod lexer;
 mod tokens;
 
