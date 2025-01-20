@@ -83,7 +83,7 @@ impl Typeable for OpType {
 
 pub struct Inference<'m> {
     pub module: &'m Module,
-    typed_module: TypedModule<'m>,
+    pub typed_module: TypedModule<'m>,
     constr_data_def_map: HashMap<&'m str, &'m DataDef>,
     constr_optype_map: HashMap<&'m str, OpType>,
     counter: usize,
@@ -124,25 +124,22 @@ impl<'m> Inference<'m> {
         }
     }
 
-    pub fn typecheck(&mut self) -> Result<HashMap<String, OpType>, InferenceError> {
-        let mut inferred_map = HashMap::new();
+    pub fn typecheck(&mut self) -> Result<(), InferenceError> {
         for (op_name, op_def) in self.module.op_defs.iter() {
             if op_name.starts_with("noc") {
                 continue;
             }
             let inf = self.infer(&op_def.body)?;
-            let foobar = self
-                .inf_vs_ann(inf, &op_def.ann)
+            self.inf_vs_ann(inf, &op_def.ann)
                 .map_err(|error| InferenceError {
                     error,
                     span: op_def.span.clone(),
                 })?;
-            inferred_map.insert(op_name.to_owned(), foobar);
         }
-        Ok(inferred_map)
+        Ok(())
     }
 
-    fn inf_vs_ann(&mut self, inf: OpType, ann: &OpType) -> Result<OpType, InferenceErrorMessage> {
+    fn inf_vs_ann(&mut self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
         let s = self.unify_op(ann, &inf)?;
         // ann matches the inf when all subs associated with ftv of annotation are poly
         for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
@@ -154,7 +151,7 @@ impl<'m> Inference<'m> {
                 ))?,
             }
         }
-        Ok(inf.apply(&s))
+        Ok(())
     }
 
     fn gen_name(&mut self) -> Type {
