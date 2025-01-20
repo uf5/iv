@@ -1,8 +1,8 @@
 use lalrpop_util::lalrpop_mod;
 
 pub mod ast;
-pub mod module_wrapper;
 mod lexer;
+pub mod module_wrapper;
 mod tokens;
 
 lalrpop_mod!(

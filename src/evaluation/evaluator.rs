@@ -1,16 +1,18 @@
 use super::types::*;
-use crate::syntax::ast::*;
+use crate::syntax::{ast::*, module_wrapper::ModuleConstrMaps};
 
 pub struct Evaluator<'m> {
     module: &'m Module,
-
+    constr_maps: ModuleConstrMaps<'m>,
     pub stack: Vec<Value>,
 }
 
 impl<'m> Evaluator<'m> {
     pub fn new(module: &'m Module) -> Self {
+        let constr_maps = ModuleConstrMaps::new(module);
         Evaluator {
             module,
+            constr_maps,
             stack: vec![],
         }
     }
@@ -37,9 +39,25 @@ impl<'m> Evaluator<'m> {
                     println!("tracing: {:?}", self.stack);
                 } else if let Some(op_def) = self.module.op_defs.get(op_name) {
                     self.eval_sentence(&op_def.body);
+                } else if let Some(constr_def) =
+                    self.constr_maps.constr_to_constr_map.get(op_name.as_str())
+                {
+                    let args = constr_def
+                        .params
+                        .iter()
+                        .map(|_| {
+                            self.stack
+                                .pop()
+                                .expect("type checker seems to have missed a stack underflow error")
+                        })
+                        .collect();
+                    self.stack.push(Value::User {
+                        constr_name: op_name.to_owned(),
+                        args,
+                    });
                 } else {
-		    panic!("unknown operator: {}", op_name);
-		}
+                    panic!("unknown operator: {}", op_name);
+                }
             }
             Op::Case {
                 head_arm,
