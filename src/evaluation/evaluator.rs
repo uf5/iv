@@ -19,7 +19,8 @@ impl<'m> Evaluator<'m> {
         let Some(main_op_def) = self.module.op_defs.get("main") else {
             return Err(EvaluatorError::NoMain);
         };
-        Ok(self.eval_sentence(&main_op_def.body))
+        self.eval_sentence(&main_op_def.body);
+        Ok(())
     }
 
     fn eval_sentence(&mut self, ops: &[Op]) {
@@ -57,8 +58,8 @@ impl<'m> Evaluator<'m> {
                 let matching_arm = vec![head_arm]
                     .into_iter()
                     .chain(rest_arms.iter())
-                    .find(|arm| &arm.constr == &constr_name)
-                    .expect(&format!("unknown constructor: {}", &constr_name));
+                    .find(|arm| arm.constr == constr_name)
+                    .unwrap_or_else(|| panic!("unknown constructor: {}", &constr_name));
                 self.stack.extend(args.into_iter().rev());
                 self.eval_sentence(&matching_arm.body);
             }

@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::iter::zip;
 
 use super::prelude_types;
+use super::typed_ast::*;
 use super::types::*;
 use crate::syntax::ast::*;
 
@@ -45,7 +46,7 @@ impl Typeable for Type {
             Type::Op(op_type) => op_type.ftv(),
             Type::App(t1, t2) => {
                 let mut f = t1.ftv();
-                f.extend(t2.ftv().into_iter());
+                f.extend(t2.ftv());
                 f
             }
         }
@@ -82,6 +83,7 @@ impl Typeable for OpType {
 
 pub struct Inference<'m> {
     pub module: &'m Module,
+    typed_module: TypedModule<'m>,
     constr_data_def_map: HashMap<&'m str, &'m DataDef>,
     constr_optype_map: HashMap<&'m str, OpType>,
     counter: usize,
@@ -108,8 +110,14 @@ impl<'m> Inference<'m> {
                 constr_optype.insert(constr_name.as_str(), optype);
             }
         }
+        let typed_module = TypedModule {
+            ast_module: module,
+            data_defs: HashMap::new(),
+            op_defs: HashMap::new(),
+        };
         Inference {
             module,
+            typed_module,
             constr_data_def_map,
             constr_optype_map: constr_optype,
             counter: 0,

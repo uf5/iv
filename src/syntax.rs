@@ -3,7 +3,13 @@ use lalrpop_util::lalrpop_mod;
 pub mod ast;
 mod lexer;
 mod tokens;
-lalrpop_mod!(parser, "/syntax/parser.rs");
+
+lalrpop_mod!(
+    #[allow(clippy::all)]
+    #[rustfmt::skip]
+    parser,
+    "/syntax/parser.rs"
+);
 
 use ast::Module;
 use lexer::Lexer;
