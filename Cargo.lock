@@ -163,6 +163,7 @@ dependencies = [
  "lalrpop-util",
  "lazy_static",
  "logos",
+ "regex",
 ]
 
 [[package]]

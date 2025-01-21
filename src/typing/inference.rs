@@ -304,7 +304,7 @@ impl<'m> Inference<'m> {
     }
 
     fn get_prelude_optype(&self, name: &str) -> Option<OpType> {
-        prelude_types::PRELUDE_OP_TYPES.get(name).cloned()
+        prelude_types::get(name)
     }
 
     fn get_constr_optype(&self, name: &str) -> Option<OpType> {
@@ -789,5 +789,57 @@ mod tests {
         let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn prelude_br_test() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [Bar, Foo, Foo, Foo] foobar [Foo, Foo, Foo, Bar]: br-3.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn prelude_br_test_err() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [Bar, Foo, Foo, Foo] foobar [Foo, Foo, Foo, Bar]: br-2.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
+    }
+
+    #[test]
+    fn prelude_dg_test() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [Foo, Foo, Foo, Bar] foobar [Bar, Foo, Foo, Foo]: dg-3.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn prelude_dg_test_err() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [Foo, Foo, Foo, Bar] foobar [Bar, Foo, Foo, Foo]: dg-2.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
     }
 }
