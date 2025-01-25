@@ -1,0 +1,211 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+
+\newcommand{\op}[3]{[#1] \texttt{#2} [#3]}
+
+\begin{document}
+
+\section*{Minimal set of inference rules}
+This set of inference rules provides a type system that is ?decidable?,
+with a condition that all op definitions must have an annotation.
+
+\subsection*{Notation}
+
+\begin{itemize}
+\item All latin letters represent a single element type.
+\item All greek letters represent a monoid of stack element types.
+\item ``$\tau$'' is a special case and represents a singleton.
+\item ``$\cdot$'' denotes a monoid concatenation, e.g.,
+  \texttt{mappend} in Haskell.
+\item ``$\op{\textit{pre}}{}{\textit{post}}$'' represents an operator
+  type. Where \textit{pre} and \textit{post} represent the argument
+  and the return stack element types respectively.
+\item An operator(s) between the stack descriptions is a shorthand,
+  e.g., writing $\op{a, b}{foo bar}{c, d}$ is equivalent to
+  $\texttt{foo bar} : \op{a, b}{}{c, d}$
+\item The leftmost element in the stack type description is the most
+  recently pushed, e.g., $\op{}{foo bar baz}{Baz, Bar, Foo}$.
+\end{itemize}
+
+
+\subsection*{Specialization rule}
+
+\subsubsection*{Specialization rule for stack element types}
+
+\begin{equation*}
+  \tag{Spec}
+  \frac{
+    \tau' = \{ a \mapsto a' \} \tau
+  }{
+    \tau \sqsubseteq \tau'
+  }
+\end{equation*}
+LHS is considered an $\sqsubseteq$ of RHS when there exists a substitution
+that turns the LHS into the RHS.
+
+\subsubsection*{Specialization rule for operator types}
+
+\begin{equation*}
+  \tag{Spec}
+  \frac{
+    \op{\alpha'}{}{\beta'} = \{ \tau_i \mapsto \tau_i' \} \op{\alpha}{}{\beta}
+  }{
+    \op{\alpha}{}{\beta} \sqsubseteq \op{\alpha'}{}{\beta'}
+  }
+\end{equation*}
+
+\subsubsection*{Relaxed specialization with nop postfix}
+
+\begin{equation*}
+  \tag{Nop postfix}
+  \frac{
+    \op{\alpha}{}{\beta} \sqsubseteq \op{\alpha'}{}{\beta'}
+  }{
+    \op{\alpha}{}{\beta} \sqsubseteq \op{\alpha' \cdot \gamma}{}{\beta' \cdot \gamma}
+  }
+\end{equation*}
+This rule is heavily used in the pattern matching to check if the case
+arms have the same type signature.
+
+\subsection*{Operator name}
+
+\begin{equation*}
+  \tag{Op}
+  \frac{
+    \op{\alpha}{op}{\beta} \in \Gamma
+  }{
+    \Gamma \vdash
+    \op{\alpha}{op}{\beta}
+  }
+\end{equation*}
+As a consequence, all operators should have an annotation. This allows
+the type system to get rid of the generalization rule from the \textsc{hm} completely
+
+\subsection*{Instantiation}
+
+\begin{equation*}
+  \tag{Inst}
+  \frac{
+    \Gamma \vdash
+    \op{\alpha'}{op}{\beta'} \quad \op{\alpha'}{}{\beta'} \sqsubseteq \op{\alpha}{}{\beta}
+  }{
+    \Gamma \vdash
+    \op{\alpha}{op}{\beta}
+  }
+\end{equation*}
+Instantiation is the same as in the \textsc{hm}.
+
+\subsection*{Pattern matching}
+
+\begin{equation*}
+  \tag{Case}
+  \frac{
+    \Gamma \vdash
+    \op{\alpha_i}{destr1 body1}{\beta_i} \sqsubseteq \op{\alpha}{}{\beta} \quad \forall (\texttt{constr}, \texttt{body})
+  }{
+    \Gamma \vdash
+    \op{\alpha}{case\{constr1\{body1\},...\}}{\beta}
+  }
+\end{equation*}
+Where destructor is a constructor with its pre and post flipped, i.e.
+\begin{equation*}
+  \text{destr}(\op{\alpha}{constr}{\beta}) = \op{\beta}{}{\alpha}
+\end{equation*}
+
+An important thing to note is that this inference rule states that all
+match arms must have an op type that is $\sqsubseteq$ of the whole
+\texttt{case} expression op type.
+
+\subsection*{Chaining}
+Operator chaining is split into $2+1$ possible variants: overflow,
+underflow, and exact, with the last being a consequence of any of the
+first two.
+
+\subsubsection*{Overflow}
+
+\begin{equation*}
+  \tag{Overflow}
+  \frac{
+    \Gamma \vdash
+    \op{\alpha}{x}{\beta \cdot \gamma} \qquad
+    \op{\psi}{y}{\omega} \qquad
+    \beta_i \sqsubseteq \psi_i
+  }{
+    \Gamma \vdash \op{\alpha}{x y}{\omega \cdot \gamma}
+  }
+\end{equation*}
+
+\subsubsection*{Underflow}
+
+\begin{equation*}
+  \tag{Underflow}
+  \frac{
+    \Gamma \vdash
+    \op{\alpha}{x}{\beta} \qquad
+    \op{\chi \cdot \psi}{y}{\omega} \qquad
+    \beta_i \sqsubseteq \chi_i
+  }{
+    \Gamma \vdash \op{\alpha \cdot \psi}{x y}{\omega}
+  }
+\end{equation*}
+
+\subsubsection*{Exact}
+
+\begin{equation*}
+  \tag{Underflow}
+  \frac{
+    \Gamma \vdash
+    \op{\alpha}{x}{\beta} \qquad
+    \op{\psi}{y}{\omega} \qquad
+    \beta_i \sqsubseteq \psi_i
+  }{
+    \Gamma \vdash \op{\alpha}{x y}{\omega}
+  }
+\end{equation*}
+
+\subsection*{Standard operations: dup, del, bury, dig}
+
+\begin{equation*}
+  \tag{Dup}
+  \frac{
+    \,
+  }{
+    \Gamma \vdash
+    \op{\tau}{dup}{\tau, \tau}
+  }
+\end{equation*}
+
+\begin{equation*}
+  \tag{Del}
+  \frac{
+    \,
+  }{
+    \Gamma \vdash
+    \op{\tau}{del}{}
+  }
+\end{equation*}
+
+\begin{equation*}
+  \tag{Bury}
+  \frac{
+    ||\alpha|| = n
+  }{
+    \Gamma \vdash
+    \op{\tau \cdot \alpha}{br-n}{\alpha \cdot \tau}
+  }
+\end{equation*}
+
+\begin{equation*}
+  \tag{Dig}
+  \frac{
+    ||\alpha|| = n
+  }{
+    \Gamma \vdash
+    \op{\alpha \cdot \tau}{dg-n}{\tau \cdot \alpha}
+  }
+\end{equation*}
+
+All four primitive operators are self explanatory, and are related to the stack elements manipulation.
+
+\end{document}
