@@ -298,9 +298,7 @@ impl<'m> Inference<'m> {
         let destr = Self::make_destr(&constr_ot);
         let inst_destr = self.instantiate_op(destr);
         // chain the destructor with the arm body to get the complete op type
-        let (s, chained_optype) = self.chain(inst_destr, body_optype)?;
-        let chained_optype_applied = chained_optype.apply(&s);
-        Ok(chained_optype_applied)
+        self.chain(inst_destr, body_optype)
     }
 
     fn get_prelude_optype(&self, name: &str) -> Option<OpType> {
@@ -382,11 +380,7 @@ impl<'m> Inference<'m> {
     }
 
     /// Chain two operator types through unification. This includes overflow and underflow chain.
-    fn chain(
-        &mut self,
-        ot1: OpType,
-        ot2: OpType,
-    ) -> Result<(Subst, OpType), InferenceErrorMessage> {
+    fn chain(&mut self, ot1: OpType, ot2: OpType) -> Result<OpType, InferenceErrorMessage> {
         let OpType {
             pre: alpha,
             post: beta,
@@ -405,7 +399,7 @@ impl<'m> Inference<'m> {
                 .chain(beta_skip_gamma)
                 .map(|t| t.apply(&s))
                 .collect();
-            Ok((s, OpType { pre, post }))
+            Ok(OpType { pre, post })
         } else {
             // underflow chain
             let gamma_skip_beta = gamma.into_iter().skip(beta.len());
@@ -415,34 +409,25 @@ impl<'m> Inference<'m> {
                 .map(|t| t.apply(&s))
                 .collect();
             let post = delta.into_iter().map(|t| t.apply(&s)).collect();
-            Ok((s, OpType { pre, post }))
-        }
-    }
-
-    fn infer_rest(&mut self, ops: &[Op]) -> Result<(Subst, OpType), InferenceError> {
-        match ops {
-            [] => Ok((Subst::new(), OpType::empty())),
-            [o, os @ ..] => {
-                let t1 = self.infer_op(o).map_err(|error| InferenceError {
-                    error,
-                    span: o.get_span().clone(),
-                })?;
-                let (s2, t2) = self.infer_rest(os)?;
-                let (s3, t3) = self.chain(t1, t2).map_err(|error| InferenceError {
-                    error,
-                    span: o.get_span().clone(),
-                })?;
-                let s = compose(s2, s3);
-                let t = t3.apply(&s);
-                Ok((s, t))
-            }
+            Ok(OpType { pre, post })
         }
     }
 
     /// Infer the type of a sentence
     fn infer(&mut self, ops: &[Op]) -> Result<OpType, InferenceError> {
-        let (_, op_type) = self.infer_rest(ops)?;
-        Ok(op_type)
+        let mut inf = OpType::empty();
+        for op in ops {
+            let t1 = self.infer_op(op).map_err(|error| InferenceError {
+                error,
+                span: op.get_span().clone(),
+            })?;
+            let chained = self.chain(inf, t1).map_err(|error| InferenceError {
+                error,
+                span: op.get_span().clone(),
+            })?;
+            inf = chained;
+        }
+        Ok(inf)
     }
 }
 
