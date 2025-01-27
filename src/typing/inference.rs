@@ -175,7 +175,7 @@ impl<'m> Inference<'m> {
     }
 
     /// Unify two types. t1 has priority over t2, i.e., (Poly(v), t) is picked over (t, Poly(v)).
-    fn unify(&mut self, t1: &Type, t2: &Type) -> Result<Subst, InferenceErrorMessage> {
+    fn unify_elem(&mut self, t1: &Type, t2: &Type) -> Result<Subst, InferenceErrorMessage> {
         match (t1, t2) {
             (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
             (Type::Mono(_), Type::Mono(_)) => Err(InferenceErrorMessage::UnificationError(
@@ -194,8 +194,8 @@ impl<'m> Inference<'m> {
                 }
             }
             (Type::App(l1, r1), Type::App(l2, r2)) => {
-                let s1 = self.unify(l1, l2)?;
-                let s2 = self.unify(&r1.clone().apply(&s1), &r2.clone().apply(&s1))?;
+                let s1 = self.unify_elem(l1, l2)?;
+                let s2 = self.unify_elem(&r1.clone().apply(&s1), &r2.clone().apply(&s1))?;
                 Ok(compose(s1, s2))
             }
             (Type::Op(o1), Type::Op(o2)) => self.unify_op(o1, o2),
@@ -215,7 +215,7 @@ impl<'m> Inference<'m> {
         l2: &[Type],
     ) -> Result<Subst, InferenceErrorMessage> {
         zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
-            let s = self.unify(&t1.clone().apply(&s_acc), &t2.clone().apply(&s_acc))?;
+            let s = self.unify_elem(&t1.clone().apply(&s_acc), &t2.clone().apply(&s_acc))?;
             Ok(compose(s_acc, s))
         })
     }
@@ -328,6 +328,11 @@ impl<'m> Inference<'m> {
 
     fn infer_op(&mut self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
         match op {
+            Op::Ann { value, ann, .. } => {
+                let inf = self.infer_op(value)?;
+                self.inf_vs_ann(inf.clone(), ann)?;
+                Ok(ann.clone())
+            }
             Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
             Op::Name { value: n, .. } => {
                 let op_type = self

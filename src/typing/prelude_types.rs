@@ -19,10 +19,10 @@ lazy_static! {
             },
         );
         m.insert(
-            "swap",
+            "pop",
             OpType {
-                pre: vec![Type::Poly("a".to_owned()), Type::Poly("b".to_owned())],
-                post: vec![Type::Poly("b".to_owned()), Type::Poly("a".to_owned())],
+                pre: vec![Type::Poly("a".to_owned())],
+                post: vec![],
             },
         );
         m

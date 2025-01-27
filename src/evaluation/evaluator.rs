@@ -33,6 +33,7 @@ impl<'m> Evaluator<'m> {
 
     fn eval(&mut self, op: &Op) {
         match op {
+            Op::Ann { value, .. } => self.eval(value),
             Op::Literal { .. } => todo!("no literals yet"),
             Op::Name { value: op_name, .. } => {
                 if op_name == "trace" {
