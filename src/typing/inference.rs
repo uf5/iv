@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::iter::once;
 use std::iter::zip;
 
 use super::prelude_types;
@@ -365,6 +366,20 @@ impl<'m> Inference<'m> {
                     pre: vec![t_g.clone(), t_f.clone()],
                     post: vec![Type::Op(chained)],
                 })
+            }
+            Op::Name { value: n, .. } if n == "exec" => {
+                let Some(t_g) = inf_acc.post.get(0) else {
+                    return Err(InferenceErrorMessage::CompNotEnoughElems);
+                };
+                let Type::Op(ot_g) = t_g else {
+                    return Err(InferenceErrorMessage::CompNotAnOp);
+                };
+
+                // concat singleton of
+                let pre = once(t_g).chain(ot_g.pre.iter()).cloned().collect();
+                let post = ot_g.post.clone();
+
+                Ok(OpType { pre, post })
             }
             Op::Name { value: n, .. } => {
                 let op_type = self
@@ -1032,6 +1047,42 @@ mod tests {
         data Foo: foo.
         define [a] id [a]:.
         define [] foo []: (id) foo comp.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
+    }
+
+    #[test]
+    fn special_exec() {
+        let input = "
+        data Foo: foo.
+        define [] foo [Foo, Foo, Foo, Foo]: foo (dup dup dup) exec.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn special_exec_nei() {
+        let input = "
+        data Foo: foo.
+        define [] foo [Foo, Foo, Foo, Foo]: (dup dup dup) exec.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
+    }
+
+    #[test]
+    fn special_exec_nop() {
+        let input = "
+        data Foo: foo.
+        define [] foo [Foo, Foo, Foo, Foo]: foo exec.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
