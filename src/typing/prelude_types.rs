@@ -25,6 +25,16 @@ lazy_static! {
                 post: vec![],
             },
         );
+        m.insert(
+            "quote",
+            OpType {
+                pre: vec![Type::Poly("a".to_owned())],
+                post: vec![Type::Op(OpType {
+                    pre: vec![],
+                    post: vec![Type::Poly("a".to_owned())],
+                })],
+            },
+        );
         m
     };
     static ref RE_PARAMETRIC: Regex = Regex::new(r"^([a-z]+)-([\d]+)$").unwrap();
