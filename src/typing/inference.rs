@@ -334,10 +334,10 @@ impl<'m> Inference<'m> {
             .or_else(|| self.get_user_optype(name))
     }
 
-    fn infer_op(&mut self, op: &Op, inf_acc: &OpType) -> Result<OpType, InferenceErrorMessage> {
+    fn infer_op(&mut self, op: &Op, stack_s: &[Type]) -> Result<OpType, InferenceErrorMessage> {
         match op {
             Op::Ann { value, ann, .. } => {
-                let inf = self.infer_op(value, inf_acc)?;
+                let inf = self.infer_op(value, stack_s)?;
                 self.inf_vs_ann(inf.clone(), ann)?;
                 Ok(ann.clone())
             }
@@ -349,7 +349,7 @@ impl<'m> Inference<'m> {
                 // if not, this will introduce a monoid into the type signature
 
                 // getting g
-                let Some(t_g) = inf_acc.post.get(0) else {
+                let Some(t_g) = stack_s.get(0) else {
                     return Err(InferenceErrorMessage::CompNotEnoughElems);
                 };
                 let Type::Op(ot_g) = t_g else {
@@ -357,7 +357,7 @@ impl<'m> Inference<'m> {
                 };
 
                 // getting f
-                let Some(t_f) = inf_acc.post.get(1) else {
+                let Some(t_f) = stack_s.get(1) else {
                     return Err(InferenceErrorMessage::CompNotEnoughElems);
                 };
                 let Type::Op(ot_f) = t_f else {
@@ -374,7 +374,7 @@ impl<'m> Inference<'m> {
                 })
             }
             Op::Name { value: n, .. } if n == "exec" => {
-                let Some(t_g) = inf_acc.post.get(0) else {
+                let Some(t_g) = stack_s.get(0) else {
                     return Err(InferenceErrorMessage::CompNotEnoughElems);
                 };
                 let Type::Op(ot_g) = t_g else {
@@ -448,23 +448,15 @@ impl<'m> Inference<'m> {
         if beta.len() >= gamma.len() {
             // overflow chain
             let beta_skip_gamma = beta.into_iter().skip(gamma.len());
-            let pre = alpha.into_iter().map(|t| t.apply(&s)).collect();
-            let post = delta
-                .into_iter()
-                .chain(beta_skip_gamma)
-                .map(|t| t.apply(&s))
-                .collect();
-            Ok(OpType { pre, post })
+            let pre = alpha.into_iter().collect();
+            let post = delta.into_iter().chain(beta_skip_gamma).collect();
+            Ok(OpType { pre, post }.apply(&s))
         } else {
             // underflow chain
             let gamma_skip_beta = gamma.into_iter().skip(beta.len());
-            let pre = alpha
-                .into_iter()
-                .chain(gamma_skip_beta)
-                .map(|t| t.apply(&s))
-                .collect();
-            let post = delta.into_iter().map(|t| t.apply(&s)).collect();
-            Ok(OpType { pre, post })
+            let pre = alpha.into_iter().chain(gamma_skip_beta).collect();
+            let post = delta.into_iter().collect();
+            Ok(OpType { pre, post }.apply(&s))
         }
     }
 
@@ -473,7 +465,7 @@ impl<'m> Inference<'m> {
         let mut inf_acc = OpType::empty();
         for op in ops {
             let t1 = self
-                .infer_op(op, &inf_acc)
+                .infer_op(op, &inf_acc.post)
                 .map_err(|error| InferenceError {
                     error,
                     span: op.get_span().clone(),
