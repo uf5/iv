@@ -149,6 +149,8 @@ impl<'m> Inference<'m> {
     }
 
     fn inf_vs_ann(&mut self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
+        // augment stacks toward the annotation
+        let inf = self.augment_towards(inf, ann);
         let s = self.unify_op(ann, &inf)?;
         // ann matches the inf when all subs associated with ftv of annotation are poly
         for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
@@ -202,7 +204,10 @@ impl<'m> Inference<'m> {
                 let s2 = self.unify_elem(&r1.clone().apply(&s1), &r2.clone().apply(&s1))?;
                 Ok(compose(s1, s2))
             }
-            (Type::Op(o1), Type::Op(o2)) => self.unify_op(o1, o2),
+            (Type::Op(o1), Type::Op(o2)) => {
+                let (o1, o2) = self.augment_both(o1.clone(), o2.clone());
+                self.unify_op(&o1, &o2)
+            }
             (_, _) => Err(InferenceErrorMessage::UnificationError(
                 t1.clone(),
                 t2.clone(),
@@ -224,17 +229,16 @@ impl<'m> Inference<'m> {
         })
     }
 
+    /// Op unification, does not involve stack augmentation
     fn unify_op(&mut self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
-        let (
-            OpType {
-                pre: pre1,
-                post: post1,
-            },
-            OpType {
-                pre: pre2,
-                post: post2,
-            },
-        ) = self.balance_op_stack_lengths(o1.clone(), o2.clone());
+        let OpType {
+            pre: pre1,
+            post: post1,
+        } = o1;
+        let OpType {
+            pre: pre2,
+            post: post2,
+        } = o2;
         // ensure that the two types have the same size of pre and post stacks
         if pre1.len() != pre2.len() || post1.len() != post2.len() {
             return Err(InferenceErrorMessage::UnificationError(
@@ -247,18 +251,20 @@ impl<'m> Inference<'m> {
         self.unify_list(s1, &post1, &post2)
     }
 
-    /// Try to make both optypes have the same lengths of pre and post
-    fn balance_op_stack_lengths(&mut self, mut o1: OpType, mut o2: OpType) -> (OpType, OpType) {
-        while o1.pre.len() < o2.pre.len() && o1.post.len() < o2.post.len() {
+    /// Augments the first argument's pre and post stacks towards the target
+    fn augment_towards(&mut self, mut aug: OpType, target: &OpType) -> OpType {
+        while aug.pre.len() < target.pre.len() && aug.post.len() < target.post.len() {
             let new_var = self.gen_name();
-            o1.pre.push(new_var.clone());
-            o1.post.push(new_var.clone());
+            aug.pre.push(new_var.clone());
+            aug.post.push(new_var.clone());
         }
-        while o2.pre.len() < o1.pre.len() && o2.post.len() < o1.post.len() {
-            let new_var = self.gen_name();
-            o2.pre.push(new_var.clone());
-            o2.post.push(new_var.clone());
-        }
+        aug
+    }
+
+    /// augment both optypes aso that both optypes have the same stacks lengths
+    fn augment_both(&mut self, o1: OpType, o2: OpType) -> (OpType, OpType) {
+        let o1 = self.augment_towards(o1, &o2);
+        let o2 = self.augment_towards(o2, &o1);
         (o1, o2)
     }
 
@@ -406,7 +412,7 @@ impl<'m> Inference<'m> {
                         ));
                     }
                     let mut arm_ot = self.infer_case_arm(arm)?;
-                    (head_ot, arm_ot) = self.balance_op_stack_lengths(head_ot, arm_ot);
+                    (head_ot, arm_ot) = self.augment_both(head_ot, arm_ot);
                     let new_s = self.unify_op(&head_ot, &arm_ot)?;
                     s = compose(s, new_s);
                     head_ot = head_ot.apply(&s);
@@ -773,12 +779,23 @@ mod tests {
     #[test]
     fn nop_unification_test() {
         let input = "
-        define [a] nocnop [a]:. define [] nop []: nocnop.
+        define [] nop []:. define [a] foobar [a]: nop.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn nop_unification_test_err() {
+        let input = "
+        define [a] nocnop [a]:. define [] nop []: nocnop.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_err());
     }
 
     #[test]
@@ -812,8 +829,8 @@ mod tests {
         let input = "
         data Maybe a: [a] just, nothing.
         data Nat: [Nat] suc, zero.
-        define [Maybe Nat, Nat] nocfoobar [Maybe Nat, Nat]:.
-        define [Maybe Nat] nop [Maybe Nat]: nocfoobar.
+        define [Maybe Nat] natnop [Maybe Nat]:.
+        define [Maybe Nat, Nat] foobar [Maybe Nat, Nat]: natnop.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
