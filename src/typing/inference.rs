@@ -26,6 +26,9 @@ pub enum InferenceErrorMessage {
     UnknownConstructor(String),
     DuplicateConstructor(String),
     NotAllConstructorsCovered,
+    TypeOrderErrorElem { general: Type, concrete: Type },
+    TypeOrderErrorOp { general: OpType, concrete: OpType },
+    OpPrePostLenNeq { general: OpType, concrete: OpType },
 }
 
 type Subst = HashMap<String, Type>;
@@ -151,7 +154,7 @@ impl<'m> Inference<'m> {
     fn inf_vs_ann(&mut self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
         // augment stacks toward the annotation
         let inf = self.augment_towards(inf, ann);
-        let s = self.unify_op(ann, &inf)?;
+        let s = self.unify_op_ow(&inf, ann)?;
         // ann matches the inf when all subs associated with ftv of annotation are poly
         for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
             match v {
@@ -180,76 +183,153 @@ impl<'m> Inference<'m> {
         op.clone().apply(&new_var_subst)
     }
 
-    /// Unify two types. t1 has priority over t2, i.e., (Poly(v), t) is picked over (t, Poly(v)).
-    fn unify_elem(&mut self, t1: &Type, t2: &Type) -> Result<Subst, InferenceErrorMessage> {
-        match (t1, t2) {
-            (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
-            (Type::Mono(_), Type::Mono(_)) => Err(InferenceErrorMessage::UnificationError(
-                t1.clone(),
-                t2.clone(),
-            )),
-            (Type::Poly(v1), Type::Poly(v2)) if v1 == v2 => Ok(Subst::new()),
-            (Type::Poly(v), t) | (t, Type::Poly(v)) => {
-                if t.ftv().contains(v) {
-                    Err(InferenceErrorMessage::OccursCheckError(
-                        v.clone(),
-                        t.clone(),
-                    ))
-                } else {
-                    Ok(Subst::from([(v.clone(), t.clone())]))
-                }
-            }
-            (Type::App(l1, r1), Type::App(l2, r2)) => {
-                let s1 = self.unify_elem(l1, l2)?;
-                let s2 = self.unify_elem(&r1.clone().apply(&s1), &r2.clone().apply(&s1))?;
-                Ok(compose(s1, s2))
-            }
-            (Type::Op(o1), Type::Op(o2)) => {
-                let (o1, o2) = self.augment_both(o1.clone(), o2.clone());
-                self.unify_op(&o1, &o2)
-            }
-            (_, _) => Err(InferenceErrorMessage::UnificationError(
-                t1.clone(),
-                t2.clone(),
-            )),
-        }
-    }
-
-    /// Performs unification on two slices.
-    /// Performs min(l1.len(), l2.len()) unifications.
-    fn unify_list(
+    fn unify_list_bw(
         &mut self,
         s: Subst,
         l1: &[Type],
         l2: &[Type],
     ) -> Result<Subst, InferenceErrorMessage> {
-        zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
-            let s = self.unify_elem(&t1.clone().apply(&s_acc), &t2.clone().apply(&s_acc))?;
+        self.unify_list_ow(s.clone(), l1, l2)
+            .or_else(|_| self.unify_list_ow(s.clone(), l2, l1))
+    }
+
+    fn unify_list_ow(
+        &mut self,
+        s: Subst,
+        general: &[Type],
+        concrete: &[Type],
+    ) -> Result<Subst, InferenceErrorMessage> {
+        zip(general.iter(), concrete.iter()).try_fold(s, |s_acc, (g, t)| {
+            let s = self.unify_ow(&g.clone().apply(&s_acc), &t.clone().apply(&s_acc))?;
             Ok(compose(s_acc, s))
         })
     }
 
-    /// Op unification, does not involve stack augmentation
-    fn unify_op(&mut self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
-        let OpType {
-            pre: pre1,
-            post: post1,
-        } = o1;
-        let OpType {
-            pre: pre2,
-            post: post2,
-        } = o2;
-        // ensure that the two types have the same size of pre and post stacks
-        if pre1.len() != pre2.len() || post1.len() != post2.len() {
-            return Err(InferenceErrorMessage::UnificationError(
-                Type::Op(o1.clone()),
-                Type::Op(o2.clone()),
-            ));
+    fn unify_op_bw(&mut self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
+        self.unify_op_ow(o1, o2)
+            .or_else(|_| self.unify_op_ow(o2, o1))
+    }
+
+    fn unify_op_ow(
+        &mut self,
+        general: &OpType,
+        concrete: &OpType,
+    ) -> Result<Subst, InferenceErrorMessage> {
+        // this augmented op type gets deleted after exiting this funciton's
+        // scope.
+        // in theory it would be better to replace the general optype
+        // with the augmented one, but i dont think this will be an
+        // issue since [][Foo] <= [a][Foo, a].
+        // in addition, the formalized type inference rules includes the
+        // augmentation rule, which, roughly speaking, does not change the type.
+        let aug_general = self.augment_towards(general.clone(), concrete);
+        // op type pre post stacks length equality check
+        if aug_general.pre.len() != concrete.pre.len()
+            || aug_general.post.len() != concrete.post.len()
+        {
+            return Err(InferenceErrorMessage::OpPrePostLenNeq {
+                general: aug_general.clone(),
+                concrete: concrete.clone(),
+            });
         }
         // unify stacks
-        let s1 = self.unify_list(Subst::new(), &pre1, &pre2)?;
-        self.unify_list(s1, &post1, &post2)
+        let s1 = self.unify_list_ow(Subst::new(), &aug_general.pre, &concrete.pre)?;
+        self.unify_list_ow(s1, &aug_general.post, &concrete.post)
     }
+
+    /// one way type unification: general <= concrete
+    fn unify_ow(
+        &mut self,
+        general: &Type,
+        concrete: &Type,
+    ) -> Result<Subst, InferenceErrorMessage> {
+        match (general, concrete) {
+            (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
+            (Type::Poly(p1), Type::Poly(p2)) if p1 == p2 => Ok(Subst::new()),
+            (Type::Poly(v), t) => Ok(once((v.clone(), t.clone())).collect()),
+            (Type::App(f1, x1), Type::App(f2, x2)) => {
+                let s1 = self.unify_ow(f1, f2)?;
+                let s2 = self.unify_ow(&x1.clone().apply(&s1), &x2.clone().apply(&s1))?;
+                Ok(compose(s1, s2))
+            }
+            (Type::Op(o1), Type::Op(o2)) => self.unify_op_ow(o1, o2),
+            (general, concrete) => Err(InferenceErrorMessage::TypeOrderErrorElem {
+                general: general.clone(),
+                concrete: concrete.clone(),
+            }),
+        }
+    }
+
+    /// Unify two types. t1 has priority over t2, i.e., (Poly(v), t) is picked over (t, Poly(v)).
+    // fn unify_elem(&mut self, t1: &Type, t2: &Type) -> Result<Subst, InferenceErrorMessage> {
+    //     match (t1, t2) {
+    //         (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
+    //         (Type::Mono(_), Type::Mono(_)) => Err(InferenceErrorMessage::UnificationError(
+    //             t1.clone(),
+    //             t2.clone(),
+    //         )),
+    //         (Type::Poly(v1), Type::Poly(v2)) if v1 == v2 => Ok(Subst::new()),
+    //         (Type::Poly(v), t) | (t, Type::Poly(v)) => {
+    //             if t.ftv().contains(v) {
+    //                 Err(InferenceErrorMessage::OccursCheckError(
+    //                     v.clone(),
+    //                     t.clone(),
+    //                 ))
+    //             } else {
+    //                 Ok(Subst::from([(v.clone(), t.clone())]))
+    //             }
+    //         }
+    //         (Type::App(l1, r1), Type::App(l2, r2)) => {
+    //             let s1 = self.unify_elem(l1, l2)?;
+    //             let s2 = self.unify_elem(&r1.clone().apply(&s1), &r2.clone().apply(&s1))?;
+    //             Ok(compose(s1, s2))
+    //         }
+    //         (Type::Op(o1), Type::Op(o2)) => {
+    //             let (o1, o2) = self.augment_both(o1.clone(), o2.clone());
+    //             self.unify_op(&o1, &o2)
+    //         }
+    //         (_, _) => Err(InferenceErrorMessage::UnificationError(
+    //             t1.clone(),
+    //             t2.clone(),
+    //         )),
+    //     }
+    // }
+
+    // /// Performs unification on two slices.
+    // /// Performs min(l1.len(), l2.len()) unifications.
+    // fn unify_list(
+    //     &mut self,
+    //     s: Subst,
+    //     l1: &[Type],
+    //     l2: &[Type],
+    // ) -> Result<Subst, InferenceErrorMessage> {
+    //     zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (t1, t2)| {
+    //         let s = self.unify_elem(&t1.clone().apply(&s_acc), &t2.clone().apply(&s_acc))?;
+    //         Ok(compose(s_acc, s))
+    //     })
+    // }
+
+    // /// Op unification, does not involve stack augmentation
+    // fn unify_op(&mut self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
+    //     let OpType {
+    //         pre: pre1,
+    //         post: post1,
+    //     } = o1;
+    //     let OpType {
+    //         pre: pre2,
+    //         post: post2,
+    //     } = o2;
+    //     // ensure that the two types have the same size of pre and post stacks
+    //     if pre1.len() != pre2.len() || post1.len() != post2.len() {
+    //         return Err(InferenceErrorMessage::UnificationError(
+    //             Type::Op(o1.clone()),
+    //             Type::Op(o2.clone()),
+    //         ));
+    //     }
+    //     // unify stacks
+    //     let s1 = self.unify_list(Subst::new(), &pre1, &pre2)?;
+    //     self.unify_list(s1, &post1, &post2)
+    // }
 
     /// Augments the first argument's pre and post stacks towards the target
     fn augment_towards(&mut self, mut aug: OpType, target: &OpType) -> OpType {
@@ -413,7 +493,7 @@ impl<'m> Inference<'m> {
                     }
                     let mut arm_ot = self.infer_case_arm(arm)?;
                     (head_ot, arm_ot) = self.augment_both(head_ot, arm_ot);
-                    let new_s = self.unify_op(&head_ot, &arm_ot)?;
+                    let new_s = self.unify_op_bw(&head_ot, &arm_ot)?;
                     s = compose(s, new_s);
                     head_ot = head_ot.apply(&s);
                 }
@@ -444,7 +524,7 @@ impl<'m> Inference<'m> {
             pre: gamma,
             post: delta,
         } = ot2;
-        let s = self.unify_list(Subst::new(), &beta, &gamma)?;
+        let s = self.unify_list_bw(Subst::new(), &beta, &gamma)?;
         if beta.len() >= gamma.len() {
             // overflow chain
             let beta_skip_gamma = beta.into_iter().skip(gamma.len());
@@ -906,6 +986,18 @@ mod tests {
     }
 
     #[test]
+    fn special_comp_test_dup1() {
+        let input = "
+        data Foo: foo.
+        define [] foo [[a][Foo, a, a]]: (foo) (dup) comp.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
     fn todo_nop_postfix_ann_vs_inf_bad() {
         let input = "
         data Foo: foo.
@@ -975,7 +1067,7 @@ mod tests {
         data Foo: foo.
         data Bar: bar.
         define [a] id [a]:.
-        define [] foo [[][Bar]]: (bar) (id) comp.
+        define [] foo [[][Bar]]: (id) (bar) comp.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
