@@ -382,6 +382,9 @@ impl<'m> Inference<'m> {
                     post: vec![Type::Op(chained)],
                 })
             }
+            Op::Name { value: n, .. } if n == "stacktrace" => {
+                panic!("stack trace: {:?}", stack_s)
+            }
             Op::Name { value: n, .. } if n == "exec" => {
                 let Some(t_g) = stack_s.get(0) else {
                     return Err(InferenceErrorMessage::CompNotEnoughElems);
@@ -1125,6 +1128,36 @@ mod tests {
         let input = "
         define [a] foo-1 [a]:.
         define [b] foo [b]: foo-1.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn nat_list_sum_test() {
+        let input = "
+        data Nat:
+          zero,
+          [Nat] suc.
+
+        define [Nat, Nat] natsum [Nat]:
+          case { zero { },
+                 suc { natsum suc },
+               }.
+
+        data List a:
+          empty,
+          [a, List a] cons.
+
+        define [] nop []:.
+
+        define [[a][b], List a] map [List b]:
+          br-1
+          case { empty { pop empty },
+                 cons { br-2 dg-1 dup br-2 map br-2 exec cons },
+               }.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
