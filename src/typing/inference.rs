@@ -1137,6 +1137,7 @@ mod tests {
 
     #[test]
     fn nat_list_sum_test() {
+        // exec can infer that the poly is an optype
         let input = "
         data Nat:
           zero,
@@ -1157,6 +1158,37 @@ mod tests {
           br-1
           case { empty { pop empty },
                  cons { br-2 dg-1 dup br-2 map br-2 exec cons },
+               }.
+        ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn nat_list_sum_test2() {
+        // exec cannot infer that the poly is an optype
+        let input = "
+        data Nat:
+          zero,
+          [Nat] suc.
+
+        define [Nat, Nat] natsum [Nat]:
+          case { zero { },
+                 suc { natsum suc },
+               }.
+
+        data List a:
+          empty,
+          [a, List a] cons.
+
+        define [] nop []:.
+
+        define [[a][b], List a] map [List b]:
+          br-1
+          case { empty { pop empty },
+                 cons { dg-2 dup dg-2 br-1 exec br-2 map dg-1 cons },
                }.
         ";
         let module = parse(&input).unwrap();
