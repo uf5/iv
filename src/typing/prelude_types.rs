@@ -34,6 +34,38 @@ lazy_static! {
                 })],
             },
         );
+        m.insert(
+            "exec",
+            OpType {
+                pre: vec![
+                    Type::Op(OpType {
+                        pre: vec![Type::Poly("a".to_owned())],
+                        post: vec![Type::Poly("b".to_owned())],
+                    }),
+                    Type::Poly("a".to_owned()),
+                ],
+                post: vec![Type::Poly("b".to_owned())],
+            },
+        );
+        m.insert(
+            "comp",
+            OpType {
+                pre: vec![
+                    Type::Op(OpType {
+                        pre: vec![Type::Poly("b".to_owned())],
+                        post: vec![Type::Poly("c".to_owned())],
+                    }),
+                    Type::Op(OpType {
+                        pre: vec![Type::Poly("a".to_owned())],
+                        post: vec![Type::Poly("b".to_owned())],
+                    }),
+                ],
+                post: vec![Type::Op(OpType {
+                    pre: vec![Type::Poly("a".to_owned())],
+                    post: vec![Type::Poly("c".to_owned())],
+                })],
+            },
+        );
         m
     };
 }
