@@ -7,6 +7,14 @@ fn gen_prelude_type(prefix: &str, i: usize) -> Type {
     Type::Poly(format!("_prelude_{}_{}", prefix, i))
 }
 
+fn mk_tuple(a: Type, b: Type) -> Type {
+    let tuple_mono = Type::Mono("Tuple".to_owned());
+    Type::App(
+        Box::new(Type::App(Box::new(tuple_mono), Box::new(a))),
+        Box::new(b),
+    )
+}
+
 lazy_static! {
     static ref PRELUDE_OP_TYPES: HashMap<&'static str, OpType> = {
         let mut m = HashMap::new();
@@ -94,32 +102,40 @@ fn get_dig(name: &str) -> Option<OpType> {
 
 fn get_pack(name: &str) -> Option<OpType> {
     let n = parse_parametric("pack-", name)?;
+    // tuple with 0 or 1 elements can not exist
+    if n < 2 {
+        return None;
+    }
     let elems: Vec<Type> = (0..n).map(|i| gen_prelude_type("elem", i)).collect();
-    let tuple = elems.iter().cloned().fold(Type::mono_unit(), |acc, v| {
-        Type::App(
-            Box::new(Type::App(Box::new(Type::mono_tuple()), Box::new(v))),
-            Box::new(acc),
-        )
-    });
-    Some(OpType {
-        pre: elems,
-        post: vec![tuple],
-    })
+    assert!(elems.len() >= 2);
+    todo!()
+    //let tuple = elems.iter().cloned().fold(Type::mono_unit(), |acc, v| {
+    //    mk_tuple(acc, v)
+    //});
+    //Some(OpType {
+    //    pre: elems,
+    //    post: vec![tuple],
+    //})
 }
 
 fn get_unpack(name: &str) -> Option<OpType> {
     let n = parse_parametric("unpack-", name)?;
+    // tuple with 0 or 1 elements can not exist
+    if n < 2 {
+        return None;
+    }
     let elems: Vec<Type> = (0..n).map(|i| gen_prelude_type("elem", i)).collect();
-    let tuple = elems.iter().cloned().fold(Type::mono_unit(), |acc, v| {
-        Type::App(
-            Box::new(Type::App(Box::new(Type::mono_tuple()), Box::new(v))),
-            Box::new(acc),
-        )
-    });
-    Some(OpType {
-        pre: vec![tuple],
-        post: elems,
-    })
+    todo!()
+    //let tuple = elems.iter().cloned().fold(Type::mono_unit(), |acc, v| {
+    //    Type::App(
+    //        Box::new(Type::App(Box::new(Type::mono_tuple()), Box::new(v))),
+    //        Box::new(acc),
+    //    )
+    //});
+    //Some(OpType {
+    //    pre: vec![tuple],
+    //    post: elems,
+    //})
 }
 
 fn get_parametric(name: &str) -> Option<OpType> {
