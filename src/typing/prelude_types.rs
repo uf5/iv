@@ -70,12 +70,12 @@ lazy_static! {
     };
 }
 
-fn parse_bury(name: &str) -> Option<usize> {
-    name.strip_prefix("br-")?.parse().ok()
+fn parse_parametric(prefix: &'static str, name: &str) -> Option<usize> {
+    name.strip_prefix(prefix)?.parse().ok()
 }
 
 fn get_bury(name: &str) -> Option<OpType> {
-    let n = parse_bury(name)?;
+    let n = parse_parametric("br-", name)?;
     let tau = gen_prelude_type("tau", 0);
     let alpha: Vec<Type> = (0..n).map(|i| gen_prelude_type("alpha", i)).collect();
     let pre = once(&tau).chain(alpha.iter()).cloned().collect();
@@ -83,12 +83,8 @@ fn get_bury(name: &str) -> Option<OpType> {
     Some(OpType { pre, post })
 }
 
-fn parse_dig(name: &str) -> Option<usize> {
-    name.strip_prefix("dg-")?.parse().ok()
-}
-
 fn get_dig(name: &str) -> Option<OpType> {
-    let n = parse_dig(name)?;
+    let n = parse_parametric("dg-", name)?;
     let tau = gen_prelude_type("tau", 0);
     let alpha: Vec<Type> = (0..n).map(|i| gen_prelude_type("alpha", i)).collect();
     let pre = alpha.iter().chain(once(&tau)).cloned().collect();
@@ -96,8 +92,41 @@ fn get_dig(name: &str) -> Option<OpType> {
     Some(OpType { pre, post })
 }
 
+fn get_pack(name: &str) -> Option<OpType> {
+    let n = parse_parametric("pack-", name)?;
+    let elems: Vec<Type> = (0..n).map(|i| gen_prelude_type("elem", i)).collect();
+    let tuple = elems.iter().cloned().fold(Type::mono_unit(), |acc, v| {
+        Type::App(
+            Box::new(Type::App(Box::new(Type::mono_tuple()), Box::new(v))),
+            Box::new(acc),
+        )
+    });
+    Some(OpType {
+        pre: elems,
+        post: vec![tuple],
+    })
+}
+
+fn get_unpack(name: &str) -> Option<OpType> {
+    let n = parse_parametric("unpack-", name)?;
+    let elems: Vec<Type> = (0..n).map(|i| gen_prelude_type("elem", i)).collect();
+    let tuple = elems.iter().cloned().fold(Type::mono_unit(), |acc, v| {
+        Type::App(
+            Box::new(Type::App(Box::new(Type::mono_tuple()), Box::new(v))),
+            Box::new(acc),
+        )
+    });
+    Some(OpType {
+        pre: vec![tuple],
+        post: elems,
+    })
+}
+
 fn get_parametric(name: &str) -> Option<OpType> {
-    get_bury(name).or_else(|| get_dig(name))
+    get_bury(name)
+        .or_else(|| get_dig(name))
+        .or_else(|| get_pack(name))
+        .or_else(|| get_unpack(name))
 }
 
 pub fn get(name: &str) -> Option<OpType> {

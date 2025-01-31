@@ -6,6 +6,16 @@ pub enum Type {
     App(Box<Type>, Box<Type>),
 }
 
+impl Type {
+    pub fn mono_tuple() -> Self {
+        Self::Mono("Tuple".to_owned())
+    }
+
+    pub fn mono_unit() -> Self {
+        Self::Mono("Unit".to_owned())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpType {
     pub pre: Vec<Type>,
