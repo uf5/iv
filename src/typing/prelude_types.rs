@@ -107,15 +107,19 @@ fn get_pack(name: &str) -> Option<OpType> {
         return None;
     }
     let elems: Vec<Type> = (0..n).map(|i| gen_prelude_type("elem", i)).collect();
-    assert!(elems.len() >= 2);
-    todo!()
-    //let tuple = elems.iter().cloned().fold(Type::mono_unit(), |acc, v| {
-    //    mk_tuple(acc, v)
-    //});
-    //Some(OpType {
-    //    pre: elems,
-    //    post: vec![tuple],
-    //})
+    let [rest @ .., last_1, last_2] = &elems[..] else {
+        unreachable!()
+    };
+    let packed = rest
+        .iter()
+        .cloned()
+        .fold(mk_tuple(last_1.clone(), last_2.clone()), |acc, x| {
+            mk_tuple(x, acc)
+        });
+    Some(OpType {
+        pre: elems,
+        post: vec![packed],
+    })
 }
 
 fn get_unpack(name: &str) -> Option<OpType> {
@@ -125,17 +129,19 @@ fn get_unpack(name: &str) -> Option<OpType> {
         return None;
     }
     let elems: Vec<Type> = (0..n).map(|i| gen_prelude_type("elem", i)).collect();
-    todo!()
-    //let tuple = elems.iter().cloned().fold(Type::mono_unit(), |acc, v| {
-    //    Type::App(
-    //        Box::new(Type::App(Box::new(Type::mono_tuple()), Box::new(v))),
-    //        Box::new(acc),
-    //    )
-    //});
-    //Some(OpType {
-    //    pre: vec![tuple],
-    //    post: elems,
-    //})
+    let [rest @ .., last_1, last_2] = &elems[..] else {
+        unreachable!()
+    };
+    let packed = rest
+        .iter()
+        .cloned()
+        .fold(mk_tuple(last_1.clone(), last_2.clone()), |acc, x| {
+            mk_tuple(x, acc)
+        });
+    Some(OpType {
+        pre: vec![packed],
+        post: elems,
+    })
 }
 
 fn get_parametric(name: &str) -> Option<OpType> {
