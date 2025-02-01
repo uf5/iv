@@ -1,41 +1,8 @@
 use super::types::*;
-use lazy_static::lazy_static;
-use std::collections::HashMap;
 use std::iter::once;
 
 fn gen_prelude_type(prefix: &str, i: usize) -> Type {
     Type::Poly(format!("_prelude_{}_{}", prefix, i))
-}
-
-lazy_static! {
-    static ref PRELUDE_OP_TYPES: HashMap<&'static str, OpType> = {
-        let mut m = HashMap::new();
-        m.insert(
-            "dup",
-            OpType {
-                pre: vec![Type::Poly("a".to_owned())],
-                post: vec![Type::Poly("a".to_owned()), Type::Poly("a".to_owned())],
-            },
-        );
-        m.insert(
-            "pop",
-            OpType {
-                pre: vec![Type::Poly("a".to_owned())],
-                post: vec![],
-            },
-        );
-        m.insert(
-            "quote",
-            OpType {
-                pre: vec![Type::Poly("a".to_owned())],
-                post: vec![Type::Op(OpType {
-                    pre: vec![],
-                    post: vec![Type::Poly("a".to_owned())],
-                })],
-            },
-        );
-        m
-    };
 }
 
 fn parse_parametric<const N: usize>(prefix: &str, s: &str) -> Option<[usize; N]> {
@@ -46,6 +13,27 @@ fn parse_parametric<const N: usize>(prefix: &str, s: &str) -> Option<[usize; N]>
         .ok()?
         .try_into()
         .ok()
+}
+
+fn get_basic(s: &str) -> Option<OpType> {
+    match s {
+        "dup" => Some(OpType {
+            pre: vec![Type::Poly("a".to_owned())],
+            post: vec![Type::Poly("a".to_owned()), Type::Poly("a".to_owned())],
+        }),
+        "pop" => Some(OpType {
+            pre: vec![Type::Poly("a".to_owned())],
+            post: vec![],
+        }),
+        "quote" => Some(OpType {
+            pre: vec![Type::Poly("a".to_owned())],
+            post: vec![Type::Op(OpType {
+                pre: vec![],
+                post: vec![Type::Poly("a".to_owned())],
+            })],
+        }),
+        _ => None,
+    }
 }
 
 fn get_bury(s: &str) -> Option<OpType> {
@@ -84,8 +72,5 @@ fn get_parametric(s: &str) -> Option<OpType> {
 }
 
 pub fn get(s: &str) -> Option<OpType> {
-    PRELUDE_OP_TYPES
-        .get(s)
-        .cloned()
-        .or_else(|| get_parametric(s))
+    get_basic(s).or_else(|| get_parametric(s))
 }

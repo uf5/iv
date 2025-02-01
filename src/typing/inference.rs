@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::iter::once;
 use std::iter::zip;
 
-use super::prelude_types;
 use super::types::*;
 use crate::syntax::ast::*;
 use crate::syntax::module_wrapper::ModuleConstrMaps;
@@ -319,7 +318,7 @@ impl<'m> Inference<'m> {
     }
 
     fn get_prelude_optype(&self, name: &str) -> Option<OpType> {
-        prelude_types::get(name)
+        todo!()
     }
 
     fn get_constr_optype(&self, name: &str) -> Option<OpType> {
