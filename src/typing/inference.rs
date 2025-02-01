@@ -1,3 +1,4 @@
+use super::prelude_types;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::once;
@@ -318,7 +319,7 @@ impl<'m> Inference<'m> {
     }
 
     fn get_prelude_optype(&self, name: &str) -> Option<OpType> {
-        todo!()
+        prelude_types::get(name)
     }
 
     fn get_constr_optype(&self, name: &str) -> Option<OpType> {
