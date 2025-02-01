@@ -7,14 +7,6 @@ fn gen_prelude_type(prefix: &str, i: usize) -> Type {
     Type::Poly(format!("_prelude_{}_{}", prefix, i))
 }
 
-fn mk_tuple(a: Type, b: Type) -> Type {
-    let tuple_mono = Type::Mono("Tuple".to_owned());
-    Type::App(
-        Box::new(Type::App(Box::new(tuple_mono), Box::new(a))),
-        Box::new(b),
-    )
-}
-
 lazy_static! {
     static ref PRELUDE_OP_TYPES: HashMap<&'static str, OpType> = {
         let mut m = HashMap::new();
@@ -42,48 +34,22 @@ lazy_static! {
                 })],
             },
         );
-        m.insert(
-            "exec",
-            OpType {
-                pre: vec![
-                    Type::Op(OpType {
-                        pre: vec![Type::Poly("a".to_owned())],
-                        post: vec![Type::Poly("b".to_owned())],
-                    }),
-                    Type::Poly("a".to_owned()),
-                ],
-                post: vec![Type::Poly("b".to_owned())],
-            },
-        );
-        m.insert(
-            "comp",
-            OpType {
-                pre: vec![
-                    Type::Op(OpType {
-                        pre: vec![Type::Poly("b".to_owned())],
-                        post: vec![Type::Poly("c".to_owned())],
-                    }),
-                    Type::Op(OpType {
-                        pre: vec![Type::Poly("a".to_owned())],
-                        post: vec![Type::Poly("b".to_owned())],
-                    }),
-                ],
-                post: vec![Type::Op(OpType {
-                    pre: vec![Type::Poly("a".to_owned())],
-                    post: vec![Type::Poly("c".to_owned())],
-                })],
-            },
-        );
         m
     };
 }
 
-fn parse_parametric(prefix: &'static str, name: &str) -> Option<usize> {
-    name.strip_prefix(prefix)?.parse().ok()
+fn parse_parametric<const N: usize>(prefix: &str, s: &str) -> Option<[usize; N]> {
+    let rest = s.strip_prefix(prefix)?;
+    rest.split('-')
+        .map(str::parse)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?
+        .try_into()
+        .ok()
 }
 
-fn get_bury(name: &str) -> Option<OpType> {
-    let n = parse_parametric("br-", name)?;
+fn get_bury(s: &str) -> Option<OpType> {
+    let [n] = parse_parametric("br-", s)?;
     let tau = gen_prelude_type("tau", 0);
     let alpha: Vec<Type> = (0..n).map(|i| gen_prelude_type("alpha", i)).collect();
     let pre = once(&tau).chain(alpha.iter()).cloned().collect();
@@ -91,8 +57,8 @@ fn get_bury(name: &str) -> Option<OpType> {
     Some(OpType { pre, post })
 }
 
-fn get_dig(name: &str) -> Option<OpType> {
-    let n = parse_parametric("dg-", name)?;
+fn get_dig(s: &str) -> Option<OpType> {
+    let [n] = parse_parametric("dg-", s)?;
     let tau = gen_prelude_type("tau", 0);
     let alpha: Vec<Type> = (0..n).map(|i| gen_prelude_type("alpha", i)).collect();
     let pre = alpha.iter().chain(once(&tau)).cloned().collect();
@@ -100,60 +66,26 @@ fn get_dig(name: &str) -> Option<OpType> {
     Some(OpType { pre, post })
 }
 
-fn get_pack(name: &str) -> Option<OpType> {
-    let n = parse_parametric("pack-", name)?;
-    // tuple with 0 or 1 elements can not exist
-    if n < 2 {
-        return None;
-    }
-    let elems: Vec<Type> = (0..n).map(|i| gen_prelude_type("elem", i)).collect();
-    let [rest @ .., last_1, last_2] = &elems[..] else {
-        unreachable!()
-    };
-    let packed = rest
-        .iter()
-        .cloned()
-        .fold(mk_tuple(last_1.clone(), last_2.clone()), |acc, x| {
-            mk_tuple(x, acc)
-        });
-    Some(OpType {
-        pre: elems,
-        post: vec![packed],
-    })
+fn get_comp(s: &str) -> Option<OpType> {
+    let [a_pre, a_post, b_pre, b_post] = parse_parametric("comp-", s)?;
+    todo!()
 }
 
-fn get_unpack(name: &str) -> Option<OpType> {
-    let n = parse_parametric("unpack-", name)?;
-    // tuple with 0 or 1 elements can not exist
-    if n < 2 {
-        return None;
-    }
-    let elems: Vec<Type> = (0..n).map(|i| gen_prelude_type("elem", i)).collect();
-    let [rest @ .., last_1, last_2] = &elems[..] else {
-        unreachable!()
-    };
-    let packed = rest
-        .iter()
-        .cloned()
-        .fold(mk_tuple(last_1.clone(), last_2.clone()), |acc, x| {
-            mk_tuple(x, acc)
-        });
-    Some(OpType {
-        pre: vec![packed],
-        post: elems,
-    })
+fn get_exec(s: &str) -> Option<OpType> {
+    let [pre, post] = parse_parametric("exec-", s)?;
+    todo!()
 }
 
-fn get_parametric(name: &str) -> Option<OpType> {
-    get_bury(name)
-        .or_else(|| get_dig(name))
-        .or_else(|| get_pack(name))
-        .or_else(|| get_unpack(name))
+fn get_parametric(s: &str) -> Option<OpType> {
+    get_bury(s)
+        .or_else(|| get_dig(s))
+        .or_else(|| get_comp(s))
+        .or_else(|| get_exec(s))
 }
 
-pub fn get(name: &str) -> Option<OpType> {
+pub fn get(s: &str) -> Option<OpType> {
     PRELUDE_OP_TYPES
-        .get(name)
+        .get(s)
         .cloned()
-        .or_else(|| get_parametric(name))
+        .or_else(|| get_parametric(s))
 }
