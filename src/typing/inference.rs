@@ -857,7 +857,7 @@ mod tests {
     fn special_comp_test_dup() {
         let input = "
         data Foo: foo.
-        define [] foo [[][Foo, Foo]]: (dup) (foo) comp.
+        define [] foo [[][Foo, Foo]]: (foo) (dup) comp-0-1-1-2.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -869,7 +869,7 @@ mod tests {
     fn special_comp_test_dup1() {
         let input = "
         data Foo: foo.
-        define [] foo [[a][Foo, a, a]]: (foo) (dup) comp.
+        define [] foo [[a][Foo, a, a]]: (dup) (foo) comp-1-2-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -893,7 +893,7 @@ mod tests {
     fn special_comp_test_err() {
         let input = "
         data Foo: foo.
-        define [] foo [[][Foo, Foo]]: (foo) (dup) comp.
+        define [] foo [[][Foo, Foo]]: (dup) (foo) comp-1-2-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -906,7 +906,7 @@ mod tests {
         let input = "
         data Foo: foo.
         data Bar: bar.
-        define [] foo [[][Foo, Bar]]: foo quote bar quote comp.
+        define [] foo [[][Bar, Foo]]: foo quote bar quote comp-0-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -919,7 +919,7 @@ mod tests {
         let input = "
         data Foo: foo.
         data Bar: bar.
-        define [] foo [[][Bar, Foo]]: foo quote bar quote comp.
+        define [] foo [[][Foo, Bar]]: foo quote bar quote comp-0-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -933,7 +933,7 @@ mod tests {
         data Foo: foo.
         data Bar: bar.
         define [a] id [a]:.
-        define [] foo [[Foo][Bar, Foo]]: (bar) (id) comp.
+        define [] foo [[Foo][Bar, Foo]]: (id) (bar) comp-1-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -947,7 +947,7 @@ mod tests {
         data Foo: foo.
         data Bar: bar.
         define [a] id [a]:.
-        define [] foo [[][Bar]]: (id) (bar) comp.
+        define [] foo [[][Bar]]: (bar) (id) comp-0-1-1-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -958,10 +958,7 @@ mod tests {
     #[test]
     fn special_comp_of() {
         let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [a] id [a]:.
-        define [] foo [[a][a, a, a]]: (dup) (dup) comp.
+        define [] foo [[a][a, a, a]]: (dup) (dup) comp-1-2-1-2.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -975,7 +972,7 @@ mod tests {
         data Foo: foo.
         data Bar: bar.
         define [a] id [a]:.
-        define [] foo [[a][Bar, a, a]]: (bar) (dup) comp.
+        define [] foo [[a][Bar, a, a]]: (dup) (bar) comp-1-2-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1039,7 +1036,7 @@ mod tests {
     fn special_exec() {
         let input = "
         data Foo: foo.
-        define [] foo [Foo, Foo, Foo, Foo]: foo (dup dup dup) exec.
+        define [] foo [Foo, Foo, Foo, Foo]: foo (dup dup dup) exec-1-4.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1085,7 +1082,7 @@ mod tests {
 
     #[test]
     fn nat_list_sum_test() {
-        // exec can infer that the poly is an optype
+        // stateful typechecker exec can infer that the poly is an optype
         let input = "
         data Nat:
           zero,
@@ -1105,7 +1102,7 @@ mod tests {
         define [[a][b], List a] map [List b]:
           br-1
           case { empty { pop empty },
-                 cons { br-2 dg-1 dup br-2 map br-2 exec cons },
+                 cons { br-2 dg-1 dup br-2 map br-2 exec-1-1 cons },
                }.
         ";
         let module = parse(&input).unwrap();
@@ -1116,7 +1113,7 @@ mod tests {
 
     #[test]
     fn nat_list_sum_test2() {
-        // exec cannot infer that the poly is an optype
+        // stateful typechecker exec cannot infer that the poly is an optype
         let input = "
         data Nat:
           zero,
@@ -1136,7 +1133,7 @@ mod tests {
         define [[a][b], List a] map [List b]:
           br-1
           case { empty { pop empty },
-                 cons { dg-2 dup dg-2 br-1 exec br-2 map dg-1 cons },
+                 cons { dg-2 dup dg-2 br-1 exec-1-1 br-2 map dg-1 cons },
                }.
         ";
         let module = parse(&input).unwrap();
