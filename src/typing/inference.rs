@@ -985,12 +985,12 @@ mod tests {
         let input = "
         data Foo: foo.
         define [a] id [a]:.
-        define [] foo []: (id) comp.
+        define [[a][a]] foo [[a][a]]: (id) comp-1-1-1-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
-        assert!(inferred.is_err());
+        assert!(inferred.is_ok());
     }
 
     #[test]
@@ -998,12 +998,12 @@ mod tests {
         let input = "
         data Foo: foo.
         define [a] id [a]:.
-        define [] foo []: foo comp.
+        define [[a][a]] foobar [[a][Foo, a]]: (foo) comp-1-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
-        assert!(inferred.is_err());
+        assert!(inferred.is_ok());
     }
 
     #[test]
@@ -1011,7 +1011,7 @@ mod tests {
         let input = "
         data Foo: foo.
         define [a] id [a]:.
-        define [] foo []: foo (id) comp.
+        define [] foobar []: foo (id) comp-0-1-1-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1024,7 +1024,7 @@ mod tests {
         let input = "
         data Foo: foo.
         define [a] id [a]:.
-        define [] foo []: (id) foo comp.
+        define [] foo []: (id) foobar comp-1-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1048,19 +1048,19 @@ mod tests {
     fn special_exec_nei() {
         let input = "
         data Foo: foo.
-        define [] foo [Foo, Foo, Foo, Foo]: (dup dup dup) exec.
+        define [Foo] foo [Foo, Foo, Foo, Foo]: (dup dup dup) exec-1-4.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
-        assert!(inferred.is_err());
+        assert!(inferred.is_ok());
     }
 
     #[test]
     fn special_exec_nop() {
         let input = "
         data Foo: foo.
-        define [] foo [Foo, Foo, Foo, Foo]: foo exec.
+        define [] foo [Foo, Foo, Foo, Foo]: foo exec-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
