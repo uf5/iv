@@ -1,9 +1,9 @@
+use super::prelude_types;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::once;
 use std::iter::zip;
 
-use super::prelude_types;
 use super::types::*;
 use crate::syntax::ast::*;
 use crate::syntax::module_wrapper::ModuleConstrMaps;
@@ -16,8 +16,6 @@ pub struct InferenceError {
 
 #[derive(Debug)]
 pub enum InferenceErrorMessage {
-    CompNotEnoughElems,
-    CompNotAnOp,
     AnnInfConflict(OpType, OpType),
     UnificationError(Type, Type),
     OccursCheckError(String, Type),
@@ -180,7 +178,7 @@ impl<'m> Inference<'m> {
             .iter()
             .map(|v| (v.to_owned(), self.gen_name()))
             .collect();
-        op.clone().apply(&new_var_subst)
+        op.apply(&new_var_subst)
     }
 
     fn unify_list_bw(
@@ -343,62 +341,14 @@ impl<'m> Inference<'m> {
             .or_else(|| self.get_user_optype(name))
     }
 
-    fn infer_op(&mut self, op: &Op, stack_s: &[Type]) -> Result<OpType, InferenceErrorMessage> {
+    fn infer_op(&mut self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
         match op {
             Op::Ann { value, ann, .. } => {
-                let inf = self.infer_op(value, stack_s)?;
+                let inf = self.infer_op(value)?;
                 self.inf_vs_ann(inf.clone(), ann)?;
-                Ok(ann.clone())
+                Ok(self.instantiate_op(ann.clone()))
             }
             Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
-            // TODO: this whole comp arm is very bad
-            Op::Name { value: n, .. } if n == "comp" => {
-                // [g, f] comp [f * g]
-                // there MUST always be g and f
-                // if not, this will introduce a monoid into the type signature
-
-                // getting g
-                let Some(t_g) = stack_s.get(0) else {
-                    return Err(InferenceErrorMessage::CompNotEnoughElems);
-                };
-                let Type::Op(ot_g) = t_g else {
-                    return Err(InferenceErrorMessage::CompNotAnOp);
-                };
-
-                // getting f
-                let Some(t_f) = stack_s.get(1) else {
-                    return Err(InferenceErrorMessage::CompNotEnoughElems);
-                };
-                let Type::Op(ot_f) = t_f else {
-                    return Err(InferenceErrorMessage::CompNotAnOp);
-                };
-
-                // compute their composed (chained) optype
-                let chained = self.chain(ot_g.clone(), ot_f.clone())?;
-
-                // comp's optype
-                Ok(OpType {
-                    pre: vec![t_g.clone(), t_f.clone()],
-                    post: vec![Type::Op(chained)],
-                })
-            }
-            Op::Name { value: n, .. } if n == "stacktrace" => {
-                panic!("stack trace: {:?}", stack_s)
-            }
-            Op::Name { value: n, .. } if n == "exec" => {
-                let Some(t_g) = stack_s.get(0) else {
-                    return Err(InferenceErrorMessage::CompNotEnoughElems);
-                };
-                let Type::Op(ot_g) = t_g else {
-                    return Err(InferenceErrorMessage::CompNotAnOp);
-                };
-
-                // concat singleton of
-                let pre = once(t_g).chain(ot_g.pre.iter()).cloned().collect();
-                let post = ot_g.post.clone();
-
-                Ok(OpType { pre, post })
-            }
             Op::Name { value: n, .. } => {
                 let op_type = self
                     .lookup_op_optype(n)
@@ -476,12 +426,10 @@ impl<'m> Inference<'m> {
     fn infer(&mut self, ops: &[Op]) -> Result<OpType, InferenceError> {
         let mut inf_acc = OpType::empty();
         for op in ops {
-            let t1 = self
-                .infer_op(op, &inf_acc.post)
-                .map_err(|error| InferenceError {
-                    error,
-                    span: op.get_span().clone(),
-                })?;
+            let t1 = self.infer_op(op).map_err(|error| InferenceError {
+                error,
+                span: op.get_span().clone(),
+            })?;
             let chained = self.chain(inf_acc, t1).map_err(|error| InferenceError {
                 error,
                 span: op.get_span().clone(),
@@ -909,7 +857,7 @@ mod tests {
     fn special_comp_test_dup() {
         let input = "
         data Foo: foo.
-        define [] foo [[][Foo, Foo]]: (dup) (foo) comp.
+        define [] foo [[][Foo, Foo]]: (foo) (dup) comp-0-1-1-2.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -921,7 +869,7 @@ mod tests {
     fn special_comp_test_dup1() {
         let input = "
         data Foo: foo.
-        define [] foo [[a][Foo, a, a]]: (foo) (dup) comp.
+        define [] foo [[a][Foo, a, a]]: (dup) (foo) comp-1-2-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -945,7 +893,7 @@ mod tests {
     fn special_comp_test_err() {
         let input = "
         data Foo: foo.
-        define [] foo [[][Foo, Foo]]: (foo) (dup) comp.
+        define [] foo [[][Foo, Foo]]: (dup) (foo) comp-1-2-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -958,7 +906,7 @@ mod tests {
         let input = "
         data Foo: foo.
         data Bar: bar.
-        define [] foo [[][Foo, Bar]]: foo quote bar quote comp.
+        define [] foo [[][Bar, Foo]]: foo quote bar quote comp-0-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -971,7 +919,7 @@ mod tests {
         let input = "
         data Foo: foo.
         data Bar: bar.
-        define [] foo [[][Bar, Foo]]: foo quote bar quote comp.
+        define [] foo [[][Foo, Bar]]: foo quote bar quote comp-0-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -985,7 +933,7 @@ mod tests {
         data Foo: foo.
         data Bar: bar.
         define [a] id [a]:.
-        define [] foo [[Foo][Bar, Foo]]: (bar) (id) comp.
+        define [] foo [[Foo][Bar, Foo]]: (id) (bar) comp-1-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -999,7 +947,7 @@ mod tests {
         data Foo: foo.
         data Bar: bar.
         define [a] id [a]:.
-        define [] foo [[][Bar]]: (id) (bar) comp.
+        define [] foo [[][Bar]]: (bar) (id) comp-0-1-1-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1010,10 +958,7 @@ mod tests {
     #[test]
     fn special_comp_of() {
         let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [a] id [a]:.
-        define [] foo [[a][a, a, a]]: (dup) (dup) comp.
+        define [] foo [[a][a, a, a]]: (dup) (dup) comp-1-2-1-2.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1027,7 +972,7 @@ mod tests {
         data Foo: foo.
         data Bar: bar.
         define [a] id [a]:.
-        define [] foo [[a][Bar, a, a]]: (bar) (dup) comp.
+        define [] foo [[a][Bar, a, a]]: (dup) (bar) comp-1-2-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1040,12 +985,12 @@ mod tests {
         let input = "
         data Foo: foo.
         define [a] id [a]:.
-        define [] foo []: (id) comp.
+        define [[a][a]] foo [[a][a]]: (id) comp-1-1-1-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
-        assert!(inferred.is_err());
+        assert!(inferred.is_ok());
     }
 
     #[test]
@@ -1053,12 +998,12 @@ mod tests {
         let input = "
         data Foo: foo.
         define [a] id [a]:.
-        define [] foo []: foo comp.
+        define [[a][a]] foobar [[a][Foo, a]]: (foo) comp-1-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
-        assert!(inferred.is_err());
+        assert!(inferred.is_ok());
     }
 
     #[test]
@@ -1066,7 +1011,7 @@ mod tests {
         let input = "
         data Foo: foo.
         define [a] id [a]:.
-        define [] foo []: foo (id) comp.
+        define [] foobar []: foo (id) comp-0-1-1-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1079,7 +1024,7 @@ mod tests {
         let input = "
         data Foo: foo.
         define [a] id [a]:.
-        define [] foo []: (id) foo comp.
+        define [] foo []: (id) foobar comp-1-1-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1091,7 +1036,7 @@ mod tests {
     fn special_exec() {
         let input = "
         data Foo: foo.
-        define [] foo [Foo, Foo, Foo, Foo]: foo (dup dup dup) exec.
+        define [] foo [Foo, Foo, Foo, Foo]: foo (dup dup dup) exec-1-4.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1103,19 +1048,19 @@ mod tests {
     fn special_exec_nei() {
         let input = "
         data Foo: foo.
-        define [] foo [Foo, Foo, Foo, Foo]: (dup dup dup) exec.
+        define [Foo] foo [Foo, Foo, Foo, Foo]: (dup dup dup) exec-1-4.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
         println!("{:?}", inferred);
-        assert!(inferred.is_err());
+        assert!(inferred.is_ok());
     }
 
     #[test]
     fn special_exec_nop() {
         let input = "
         data Foo: foo.
-        define [] foo [Foo, Foo, Foo, Foo]: foo exec.
+        define [] foo [Foo, Foo, Foo, Foo]: foo exec-0-1.
         ";
         let module = parse(&input).unwrap();
         let inferred = Inference::new(&module).typecheck();
@@ -1137,7 +1082,7 @@ mod tests {
 
     #[test]
     fn nat_list_sum_test() {
-        // exec can infer that the poly is an optype
+        // stateful typechecker exec can infer that the poly is an optype
         let input = "
         data Nat:
           zero,
@@ -1157,7 +1102,7 @@ mod tests {
         define [[a][b], List a] map [List b]:
           br-1
           case { empty { pop empty },
-                 cons { br-2 dg-1 dup br-2 map br-2 exec cons },
+                 cons { br-2 dg-1 dup br-2 map br-2 exec-1-1 cons },
                }.
         ";
         let module = parse(&input).unwrap();
@@ -1168,7 +1113,7 @@ mod tests {
 
     #[test]
     fn nat_list_sum_test2() {
-        // exec cannot infer that the poly is an optype
+        // stateful typechecker exec cannot infer that the poly is an optype
         let input = "
         data Nat:
           zero,
@@ -1188,7 +1133,7 @@ mod tests {
         define [[a][b], List a] map [List b]:
           br-1
           case { empty { pop empty },
-                 cons { dg-2 dup dg-2 br-1 exec br-2 map dg-1 cons },
+                 cons { dg-2 dup dg-2 br-1 exec-1-1 br-2 map dg-1 cons },
                }.
         ";
         let module = parse(&input).unwrap();

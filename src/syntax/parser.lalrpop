@@ -42,12 +42,19 @@ DataConstr: (String, DataConstr) = {
     <start:@L> "[" <params:Comma<Type>> "]" <name:"lident"> <end:@R> => (name.to_owned(), DataConstr { params, span: Span { start, end } }),
 };
 
-Type: Type = {
-    #[precedence(level="0")]
+// this thing falls apart if merged into a single rule
+
+TypeSingle: Type = {
     <name:"lident"> => Type::Poly(name.to_owned()),
     <name:"uident"> => Type::Mono(name.to_owned()),
     "[" <pre:Comma<Type>> "]" "[" <post:Comma<Type>> "]" => Type::Op(OpType { pre, post }), 
-    #[precedence(level="1")] #[assoc(side="left")]
+    "(" <t:Type> ")" => t,
+};
+
+Type: Type = {
+    #[precedence(level="1")]
+    <TypeSingle> => <>,
+    #[precedence(level="2")] #[assoc(side="left")]
     <t1:Type> <t2:Type> => Type::App(Box::new(t1), Box::new(t2)),
 };
 
