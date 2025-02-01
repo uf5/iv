@@ -39,12 +39,18 @@ fn main() {
     };
     match cli_args.mode {
         cli::Mode::Typecheck => {
-            let module = parse(&input).unwrap();
             let mut inf = Inference::new(&module);
-            println!("{:?}", inf.typecheck());
+            match inf.typecheck() {
+                Ok(_) => {
+                    println!("success!")
+                }
+                Err(err) => {
+                    cli::print_span_in_source(&input, &err.span);
+                    panic!("typechecker error {:?}", err.error)
+                }
+            }
         }
         cli::Mode::Evaluate => {
-            let module = parse(&input).unwrap();
             let mut evaluator = Evaluator::new(&module);
             evaluator.eval_main().expect("no main function");
             println!("{:?}", evaluator.stack);
