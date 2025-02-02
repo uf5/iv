@@ -59,6 +59,10 @@ impl<'m> Evaluator<'m> {
                         Value::QValue { value } => self.stack.push(*value),
                         _ => panic!("topmost is not an op"),
                     }
+                } else if op_name == "dup" {
+                    let value = self.pop();
+                    self.stack.push(value.clone());
+                    self.stack.push(value.clone());
                 } else if op_name == "pop" {
                     self.pop();
                 } else if op_name == "quote" {
@@ -386,6 +390,25 @@ mod tests {
             [
                 Value::User { constr_name: ref name1, args: ref args1 },
             ] if name1 == "foo" && args1.is_empty()
+        ));
+    }
+
+    #[test]
+    fn dup_test() {
+        let input = "
+        data Foo: foo.
+        define [] main [Foo, Foo]: foo dup.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+            ] if name1 == "foo" && args1.is_empty() && name2 == "foo" && args2.is_empty()
         ));
     }
 }
