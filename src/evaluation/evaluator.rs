@@ -58,6 +58,8 @@ impl<'m> Evaluator<'m> {
                         panic!("topmost is not an op")
                     };
                     self.eval_sentence(&ops);
+                } else if op_name == "pop" {
+                    self.pop();
                 } else if op_name == "trace" {
                     println!("tracing: {:?}", self.stack);
                 } else if let Some(op_def) = self.module.op_defs.get(op_name) {
@@ -65,11 +67,7 @@ impl<'m> Evaluator<'m> {
                 } else if let Some(constr_def) =
                     self.constr_maps.constr_to_constr_map.get(op_name.as_str())
                 {
-                    let args = constr_def
-                        .params
-                        .iter()
-                        .map(|_| self.stack.pop().expect("underflow error"))
-                        .collect();
+                    let args = constr_def.params.iter().map(|_| self.pop()).collect();
                     self.stack.push(Value::User {
                         constr_name: op_name.to_owned(),
                         args,
@@ -83,8 +81,7 @@ impl<'m> Evaluator<'m> {
                 arms: rest_arms,
                 ..
             } => {
-                let Value::User { constr_name, args } = self.stack.pop().expect("underflow error")
-                else {
+                let Value::User { constr_name, args } = self.pop() else {
                     panic!("matching a quote value")
                 };
                 let matching_arm = vec![head_arm]
@@ -352,5 +349,19 @@ mod tests {
                  name2 == "bar" && args2.is_empty() &&
                  name3 == "bar" && args3.is_empty()
         ));
+    }
+
+    #[test]
+    fn pop_test() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [] main []: bar foo pop pop.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(&evaluator.stack[..], []));
     }
 }
