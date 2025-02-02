@@ -53,6 +53,11 @@ impl<'m> Evaluator<'m> {
                 } else if let Some([n]) = parse_parametric("dg-", op_name) {
                     let digged = self.stack.remove(self.stack.len() - n - 1);
                     self.stack.push(digged);
+                } else if let Some([_, _]) = parse_parametric("exec-", op_name) {
+                    let Value::Quote { ops } = self.pop() else {
+                        panic!("topmost is not an op")
+                    };
+                    self.eval_sentence(&ops);
                 } else if op_name == "trace" {
                     println!("tracing: {:?}", self.stack);
                 } else if let Some(op_def) = self.module.op_defs.get(op_name) {
@@ -321,6 +326,31 @@ mod tests {
             ] if name1 == "bar" && args1.is_empty() &&
                  name2 == "bar" && args2.is_empty() &&
                  name3 == "foo" && args3.is_empty()
+        ));
+    }
+
+    #[test]
+    fn exec_test() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [Foo, Bar] foobar [Bar, Bar, Bar]:
+          case { foo { } } case { bar { } } bar bar bar.
+        define [] main [Bar, Bar, Bar]: bar foo (foobar) exec-2-3.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+                Value::User { constr_name: ref name3, args: ref args3 },
+            ] if name1 == "bar" && args1.is_empty() &&
+                 name2 == "bar" && args2.is_empty() &&
+                 name3 == "bar" && args3.is_empty()
         ));
     }
 }
