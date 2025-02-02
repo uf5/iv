@@ -14,4 +14,7 @@ pub enum Value {
     Quote {
         ops: Vec<Op>,
     },
+    QValue {
+        value: Box<Value>,
+    },
 }

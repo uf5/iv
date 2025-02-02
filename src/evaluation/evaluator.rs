@@ -54,12 +54,18 @@ impl<'m> Evaluator<'m> {
                     let digged = self.stack.remove(self.stack.len() - n - 1);
                     self.stack.push(digged);
                 } else if let Some([_, _]) = parse_parametric("exec-", op_name) {
-                    let Value::Quote { ops } = self.pop() else {
-                        panic!("topmost is not an op")
-                    };
-                    self.eval_sentence(&ops);
+                    match self.pop() {
+                        Value::Quote { ops } => self.eval_sentence(&ops),
+                        Value::QValue { value } => self.stack.push(*value),
+                        _ => panic!("topmost is not an op"),
+                    }
                 } else if op_name == "pop" {
                     self.pop();
+                } else if op_name == "quote" {
+                    let value = self.pop();
+                    self.stack.push(Value::QValue {
+                        value: Box::new(value),
+                    })
                 } else if op_name == "trace" {
                     println!("tracing: {:?}", self.stack);
                 } else if let Some(op_def) = self.module.op_defs.get(op_name) {
@@ -363,5 +369,23 @@ mod tests {
         evaluator.eval_main();
         println!("{:?}", evaluator.stack);
         assert!(matches!(&evaluator.stack[..], []));
+    }
+
+    #[test]
+    fn quote_test() {
+        let input = "
+        data Foo: foo.
+        define [] main [Foo]: foo quote exec-0-1.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+            ] if name1 == "foo" && args1.is_empty()
+        ));
     }
 }
