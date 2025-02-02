@@ -42,6 +42,17 @@ impl<'m> Evaluator<'m> {
         self.stack.pop().expect("underflow error")
     }
 
+    fn eval_quoted(&mut self, quoted: Quoted) {
+        match quoted {
+            Quoted::Sentence { ops } => self.eval_sentence(&ops),
+            Quoted::Value { value } => self.stack.push(*value),
+            Quoted::Composed { a, b } => {
+                self.eval_quoted(*a);
+                self.eval_quoted(*b);
+            }
+        }
+    }
+
     fn eval(&mut self, op: &Op) {
         match op {
             Op::Ann { value, .. } => self.eval(value),
@@ -55,10 +66,25 @@ impl<'m> Evaluator<'m> {
                     self.stack.push(digged);
                 } else if let Some([_, _]) = parse_parametric("exec-", op_name) {
                     match self.pop() {
-                        Value::Quote { ops } => self.eval_sentence(&ops),
-                        Value::QValue { value } => self.stack.push(*value),
-                        _ => panic!("topmost is not an op"),
+                        Value::Quoted(quoted) => {
+                            self.eval_quoted(quoted);
+                        }
+                        _ => {
+                            panic!("topmost is not an op");
+                        }
                     }
+                } else if let Some([_, _, _, _]) = parse_parametric("comp-", op_name) {
+                    let Value::Quoted(b) = self.pop() else {
+                        panic!("topmost is not a quoted");
+                    };
+                    let Value::Quoted(a) = self.pop() else {
+                        panic!("topmost is not a quoted");
+                    };
+                    let composed = Quoted::Composed {
+                        a: Box::new(a),
+                        b: Box::new(b),
+                    };
+                    self.stack.push(Value::Quoted(composed));
                 } else if op_name == "dup" {
                     let value = self.pop();
                     self.stack.push(value.clone());
@@ -67,9 +93,9 @@ impl<'m> Evaluator<'m> {
                     self.pop();
                 } else if op_name == "quote" {
                     let value = self.pop();
-                    self.stack.push(Value::QValue {
+                    self.stack.push(Value::Quoted(Quoted::Value {
                         value: Box::new(value),
-                    })
+                    }))
                 } else if op_name == "trace" {
                     println!("tracing: {:?}", self.stack);
                 } else if let Some(op_def) = self.module.op_defs.get(op_name) {
@@ -102,7 +128,9 @@ impl<'m> Evaluator<'m> {
                 self.stack.extend(args.into_iter().rev());
                 self.eval_sentence(&matching_arm.body);
             }
-            Op::Quote { value: ops, .. } => self.stack.push(Value::Quote { ops: ops.clone() }),
+            Op::Quote { value: ops, .. } => self
+                .stack
+                .push(Value::Quoted(Quoted::Sentence { ops: ops.clone() })),
         }
     }
 }
@@ -409,6 +437,26 @@ mod tests {
                 Value::User { constr_name: ref name1, args: ref args1 },
                 Value::User { constr_name: ref name2, args: ref args2 },
             ] if name1 == "foo" && args1.is_empty() && name2 == "foo" && args2.is_empty()
+        ));
+    }
+
+    #[test]
+    fn comp_test() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [] main [Bar, Foo]: (foo) (bar) comp-0-1-0-1 exec-0-2.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+            ] if name1 == "foo" && args1.is_empty() && name2 == "bar" && args2.is_empty()
         ));
     }
 }

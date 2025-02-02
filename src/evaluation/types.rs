@@ -11,10 +11,12 @@ pub enum Value {
         constr_name: String,
         args: Vec<Value>,
     },
-    Quote {
-        ops: Vec<Op>,
-    },
-    QValue {
-        value: Box<Value>,
-    },
+    Quoted(Quoted),
+}
+
+#[derive(Clone, Debug)]
+pub enum Quoted {
+    Sentence { ops: Vec<Op> },
+    Value { value: Box<Value> },
+    Composed { a: Box<Quoted>, b: Box<Quoted> },
 }
