@@ -52,7 +52,7 @@ fn main() {
         }
         cli::Mode::Evaluate => {
             let mut evaluator = Evaluator::new(&module);
-            evaluator.eval_main().expect("no main function");
+            evaluator.eval_main();
             println!("{:?}", evaluator.stack);
         }
         cli::Mode::Compile => unimplemented!("compilation"),

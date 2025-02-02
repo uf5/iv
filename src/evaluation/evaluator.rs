@@ -1,6 +1,16 @@
 use super::types::*;
 use crate::syntax::{ast::*, module_wrapper::ModuleConstrMaps};
 
+fn parse_parametric<const N: usize>(prefix: &str, s: &str) -> Option<[usize; N]> {
+    let rest = s.strip_prefix(prefix)?;
+    rest.split('-')
+        .map(str::parse)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?
+        .try_into()
+        .ok()
+}
+
 pub struct Evaluator<'m> {
     module: &'m Module,
     constr_maps: ModuleConstrMaps<'m>,
@@ -17,12 +27,9 @@ impl<'m> Evaluator<'m> {
         }
     }
 
-    pub fn eval_main(&mut self) -> Result<(), EvaluatorError> {
-        let Some(main_op_def) = self.module.op_defs.get("main") else {
-            return Err(EvaluatorError::NoMain);
-        };
+    pub fn eval_main(&mut self) {
+        let main_op_def = self.module.op_defs.get("main").expect("no main");
         self.eval_sentence(&main_op_def.body);
-        Ok(())
     }
 
     fn eval_sentence(&mut self, ops: &[Op]) {
@@ -31,12 +38,22 @@ impl<'m> Evaluator<'m> {
         }
     }
 
+    fn pop(&mut self) -> Value {
+        self.stack.pop().expect("underflow error")
+    }
+
     fn eval(&mut self, op: &Op) {
         match op {
             Op::Ann { value, .. } => self.eval(value),
-            Op::Literal { .. } => todo!("no literals yet"),
+            Op::Literal { .. } => unimplemented!("literals"),
             Op::Name { value: op_name, .. } => {
-                if op_name == "trace" {
+                if let Some([n]) = parse_parametric("br-", op_name) {
+                    let buried = self.pop();
+                    self.stack.insert(self.stack.len() - n, buried);
+                } else if let Some([n]) = parse_parametric("dg-", op_name) {
+                    let digged = self.stack.remove(self.stack.len() - n - 1);
+                    self.stack.push(digged);
+                } else if op_name == "trace" {
                     println!("tracing: {:?}", self.stack);
                 } else if let Some(op_def) = self.module.op_defs.get(op_name) {
                     self.eval_sentence(&op_def.body);
@@ -46,11 +63,7 @@ impl<'m> Evaluator<'m> {
                     let args = constr_def
                         .params
                         .iter()
-                        .map(|_| {
-                            self.stack
-                                .pop()
-                                .expect("type checker seems to have missed a stack underflow error")
-                        })
+                        .map(|_| self.stack.pop().expect("underflow error"))
                         .collect();
                     self.stack.push(Value::User {
                         constr_name: op_name.to_owned(),
@@ -65,8 +78,7 @@ impl<'m> Evaluator<'m> {
                 arms: rest_arms,
                 ..
             } => {
-                let Value::User { constr_name, args } =
-                    self.stack.pop().expect("stack underflow error")
+                let Value::User { constr_name, args } = self.stack.pop().expect("underflow error")
                 else {
                     panic!("matching a quote value")
                 };
@@ -95,7 +107,7 @@ mod tests {
         ";
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
+        evaluator.eval_main();
         assert!(matches!(evaluator.stack[..], []))
     }
 
@@ -107,7 +119,7 @@ mod tests {
         ";
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
+        evaluator.eval_main();
         assert!(matches!(
             evaluator.stack[..],
             [
@@ -128,7 +140,7 @@ mod tests {
         ";
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
+        evaluator.eval_main();
         assert!(matches!(
             &evaluator.stack[..],
             [
@@ -162,7 +174,7 @@ mod tests {
         ";
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
+        evaluator.eval_main();
         assert!(matches!(
             &evaluator.stack[..],
             [
@@ -207,7 +219,7 @@ mod tests {
         ";
         let module = parse(&input).unwrap();
         let mut evaluator = Evaluator::new(&module);
-        evaluator.eval_main().unwrap();
+        evaluator.eval_main();
         assert!(matches!(
             &evaluator.stack[..],
             [
@@ -217,6 +229,98 @@ mod tests {
             ] if name1 == "foo" && args1.is_empty() &&
                  name2 == "bar" && args2.is_empty() &&
                  name3 == "baz" && args3.is_empty()
+        ));
+    }
+
+    #[test]
+    fn bury_test() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [] main [Bar, Bar, Foo]: bar bar foo br-2.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+                Value::User { constr_name: ref name3, args: ref args3 },
+            ] if name1 == "foo" && args1.is_empty() &&
+                 name2 == "bar" && args2.is_empty() &&
+                 name3 == "bar" && args3.is_empty()
+        ));
+    }
+
+    #[test]
+    fn bury_test2() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [] main [Bar, Foo, Bar]: bar bar foo br-1.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+                Value::User { constr_name: ref name3, args: ref args3 },
+            ] if name1 == "bar" && args1.is_empty() &&
+                 name2 == "foo" && args2.is_empty() &&
+                 name3 == "bar" && args3.is_empty()
+        ));
+    }
+
+    #[test]
+    fn dig_test() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [] main [Bar, Bar, Foo]: foo bar bar dg-2.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+                Value::User { constr_name: ref name3, args: ref args3 },
+            ] if name1 == "bar" && args1.is_empty() &&
+                 name2 == "bar" && args2.is_empty() &&
+                 name3 == "foo" && args3.is_empty()
+        ));
+    }
+
+    #[test]
+    fn dig_test2() {
+        let input = "
+        data Foo: foo.
+        data Bar: bar.
+        define [] main [Bar, Bar, Foo]: bar foo bar dg-1.
+        ";
+        let module = parse(&input).unwrap();
+        let mut evaluator = Evaluator::new(&module);
+        evaluator.eval_main();
+        println!("{:?}", evaluator.stack);
+        assert!(matches!(
+            &evaluator.stack[..],
+            [
+                Value::User { constr_name: ref name1, args: ref args1 },
+                Value::User { constr_name: ref name2, args: ref args2 },
+                Value::User { constr_name: ref name3, args: ref args3 },
+            ] if name1 == "bar" && args1.is_empty() &&
+                 name2 == "bar" && args2.is_empty() &&
+                 name3 == "foo" && args3.is_empty()
         ));
     }
 }
