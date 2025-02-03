@@ -41,4 +41,6 @@ define [Reader e a, e] runReader [a]:
 
 data HelloWorld: hello, world, [HelloWorld, HelloWorld] concat.
 
-define [] main [HelloWorld]: world ask (hello concat) fmap runReader.
+define [] main [HelloWorld, HelloWorld]:
+  world ask (hello concat) fmap runReader
+  world ask (hello concat) pure apply runReader.
