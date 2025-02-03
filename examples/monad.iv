@@ -1,0 +1,23 @@
+data Reader e a: [[e][a]] run.
+
+define [[a][b], Reader e a] fmap [Reader e b]:
+  dg-1
+  case { run {
+    dg-1 comp-1-1-1-1 run
+  }}.
+
+define [a] pure [Reader e a]:
+  (pop) dg-1 quote comp-1-0-0-1 run.
+
+define [Reader e [a][b], Reader e a] apply [Reader e b]:
+  case { run {
+    dg-1
+    case { run {
+      dg-1
+      (dup) dg-1 comp-1-2-1-1
+      (dg-1) comp-1-2-2-2
+      dg-1 comp-1-2-1-1
+      (br-1 exec-1-1) comp-1-2-2-1
+      run
+    }}
+  }}.

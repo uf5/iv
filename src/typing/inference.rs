@@ -187,8 +187,10 @@ impl<'m> Inference<'m> {
         l1: &[Type],
         l2: &[Type],
     ) -> Result<Subst, InferenceErrorMessage> {
-        self.unify_list_ow(s.clone(), l1, l2)
-            .or_else(|_| self.unify_list_ow(s.clone(), l2, l1))
+        zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (g, t)| {
+            let s = self.unify_bw(&g.clone().apply(&s_acc), &t.clone().apply(&s_acc))?;
+            Ok(compose(s_acc, s))
+        })
     }
 
     fn unify_list_ow(
@@ -233,6 +235,15 @@ impl<'m> Inference<'m> {
         // unify stacks
         let s1 = self.unify_list_ow(Subst::new(), &aug_general.pre, &concrete.pre)?;
         self.unify_list_ow(s1, &aug_general.post, &concrete.post)
+    }
+
+    fn unify_bw(
+        &mut self,
+        general: &Type,
+        concrete: &Type,
+    ) -> Result<Subst, InferenceErrorMessage> {
+        self.unify_ow(general, concrete)
+            .or_else(|_| self.unify_ow(concrete, general))
     }
 
     /// one way type unification: general <= concrete
