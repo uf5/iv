@@ -31,3 +31,14 @@ define [Reader e a, [a][Reader e b]] bind [Reader e b]:
     }})
     comp-1-2-2-1 run
   }}.
+
+define [] ask [Reader e e]: () run.
+
+define [Reader e a, e] runReader [a]:
+  case { run {
+    exec-1-1
+  }}.
+
+data HelloWorld: hello, world, [HelloWorld, HelloWorld] concat.
+
+define [] main [HelloWorld]: world ask (hello concat) fmap runReader.
