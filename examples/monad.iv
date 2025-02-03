@@ -21,3 +21,13 @@ define [Reader e [a][b], Reader e a] apply [Reader e b]:
       run
     }}
   }}.
+
+define [Reader e a, [a][Reader e b]] bind [Reader e b]:
+  case { run {
+    dg-1 comp-1-1-1-1
+    (dup) dg-1 comp-1-2-1-1
+    (case { run {
+      exec-1-1
+    }})
+    comp-1-2-2-1 run
+  }}.
