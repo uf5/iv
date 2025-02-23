@@ -152,7 +152,7 @@ impl<'m> Inference<'m> {
 
     fn inf_vs_ann(&self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
         // augment stacks toward the annotation
-        let inf = self.augment_towards(inf, ann);
+        let inf = self.augment_op_ow(inf, ann);
         let s = self.unify_op_ow(&inf, ann)?;
         // ann matches the inf when all subs associated with ftv of annotation are poly
         for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
@@ -225,7 +225,7 @@ impl<'m> Inference<'m> {
         // issue since [][Foo] <= [a][Foo, a].
         // in addition, the formalized type inference rules includes the
         // augmentation rule, which, roughly speaking, does not change the type.
-        let aug_general = self.augment_towards(general.clone(), concrete);
+        let aug_general = self.augment_op_ow(general.clone(), concrete);
         // op type pre post stacks length equality check
         if aug_general.pre.len() != concrete.pre.len()
             || aug_general.post.len() != concrete.post.len()
@@ -265,19 +265,19 @@ impl<'m> Inference<'m> {
     }
 
     /// Augments the first argument's pre and post stacks towards the target
-    fn augment_towards(&self, mut aug: OpType, target: &OpType) -> OpType {
-        while aug.pre.len() < target.pre.len() && aug.post.len() < target.post.len() {
+    fn augment_op_ow(&self, mut general: OpType, concrete: &OpType) -> OpType {
+        while general.pre.len() < concrete.pre.len() && general.post.len() < concrete.post.len() {
             let new_var = self.gen_name();
-            aug.pre.push(new_var.clone());
-            aug.post.push(new_var.clone());
+            general.pre.push(new_var.clone());
+            general.post.push(new_var.clone());
         }
-        aug
+        general
     }
 
     /// augment both optypes aso that both optypes have the same stacks lengths
-    fn augment_both(&self, o1: OpType, o2: OpType) -> (OpType, OpType) {
-        let o1 = self.augment_towards(o1, &o2);
-        let o2 = self.augment_towards(o2, &o1);
+    fn augment_op_bw(&self, o1: OpType, o2: OpType) -> (OpType, OpType) {
+        let o1 = self.augment_op_ow(o1, &o2);
+        let o2 = self.augment_op_ow(o2, &o1);
         (o1, o2)
     }
 
@@ -375,7 +375,7 @@ impl<'m> Inference<'m> {
                         ));
                     }
                     let mut arm_ot = self.infer_case_arm(arm)?;
-                    (head_ot, arm_ot) = self.augment_both(head_ot, arm_ot);
+                    (head_ot, arm_ot) = self.augment_op_bw(head_ot, arm_ot);
                     let new_s = self.unify_op_bw(&head_ot, &arm_ot)?;
                     s = compose(s, new_s);
                     head_ot = head_ot.apply(&s);
