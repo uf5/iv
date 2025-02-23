@@ -1233,4 +1233,30 @@ mod tests {
         println!("{:?}", inferred);
         assert!(inferred.is_ok());
     }
+
+    #[test]
+    fn nested_case() {
+        let input = "
+            data Nat: zero, [Nat] suc.
+            data Maybe a: nothing, [a] just.
+            define [Maybe Nat] nestedcase [Maybe Nat]:
+              case { just { case { zero { nothing }, suc { suc just } } }, nothing { nothing } }.
+            ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
+
+    #[test]
+    fn mut_rec_data() {
+        let input = "
+            data Foo: [Bar] foo.
+            data Bar: [Foo] bar.
+            ";
+        let module = parse(&input).unwrap();
+        let inferred = Inference::new(&module).typecheck();
+        println!("{:?}", inferred);
+        assert!(inferred.is_ok());
+    }
 }
