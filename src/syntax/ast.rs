@@ -97,4 +97,5 @@ pub enum Literal {
 pub struct CaseArm {
     pub constr: String,
     pub body: Vec<Op>,
+    pub span: Span,
 }

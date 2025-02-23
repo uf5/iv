@@ -96,7 +96,10 @@ Literal: Literal = {
 };
 
 CaseArm: CaseArm = {
-    <constr:"lident"> "{" <body:Op*> "}" => CaseArm { constr: constr.to_owned(), body },
+    <start:@L> <constr:"lident"> "{" <body:Op*> "}" <end:@R> => {
+        let span = Span { start, end };
+        CaseArm { constr: constr.to_owned(), body, span }
+    },
 };
 
 Comma<T>: Vec<T> = {

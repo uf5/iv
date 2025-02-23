@@ -29,6 +29,7 @@ pub enum InferenceErrorMessage {
     TypeOrderErrorOp { general: OpType, concrete: OpType },
     OpPrePostLenNeq { general: OpType, concrete: OpType },
     UnusedLambdaName { name: String },
+    UnexpectedLambdaName { name: String },
 }
 
 type Subst = HashMap<String, Type>;
@@ -299,30 +300,35 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn lookup_constructor_optype(&self, name: &str) -> Result<OpType, InferenceErrorMessage> {
-        self.optype_maps
-            .constr_to_optype_map
-            .get(name)
-            .cloned()
-            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
+    fn lookup_constructor_optype(&self, name: &str) -> Option<&OpType> {
+        self.optype_maps.constr_to_optype_map.get(name)
     }
 
-    fn lookup_constructor_data_def(&self, name: &str) -> Result<&&DataDef, InferenceErrorMessage> {
+    fn lookup_constructor_data_def(&self, name: &str) -> Option<&&DataDef> {
         self.constr_maps
             .constr_to_data_map
             .get(name)
             .map(|(_data_name, data_def)| data_def)
-            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
     }
 
-    fn infer_case_arm(&self, arm: &CaseArm) -> Result<OpType, InferenceErrorMessage> {
-        let constr_ot = self.lookup_constructor_optype(arm.constr.as_str())?;
-        let body_optype = self.infer(&arm.body).map_err(|error| error.error)?;
+    fn infer_case_arm(&self, arm: &CaseArm) -> Result<OpType, InferenceError> {
+        let constr_ot = self
+            .lookup_constructor_optype(arm.constr.as_str())
+            .cloned()
+            .ok_or_else(|| InferenceError {
+                error: InferenceErrorMessage::UnknownConstructor(arm.constr.to_owned()),
+                span: arm.span.to_owned(),
+            })?;
+        let body_optype = self.infer(&arm.body)?;
         // create a destructor from the constructor op type and instantiate it
         let destr = Self::make_destr(&constr_ot);
         let inst_destr = self.instantiate_op(destr);
         // chain the destructor with the arm body to get the complete op type
         self.chain(inst_destr, body_optype)
+            .map_err(|error| InferenceError {
+                error,
+                span: arm.span.to_owned(),
+            })
     }
 
     fn get_prelude_optype(&self, name: &str) -> Option<OpType> {
@@ -348,57 +354,40 @@ impl<'m> Inference<'m> {
             .or_else(|| self.get_user_optype(name))
     }
 
-    fn infer_op(&self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
-        match op {
-            Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
-            Op::Name { value: n, .. } => {
-                let op_type = self
-                    .lookup_op_optype(n)
-                    .ok_or_else(|| InferenceErrorMessage::UnknownOp(n.clone()))?;
-                Ok(self.instantiate_op(op_type))
-            }
-            Op::Case { head_arm, arms, .. } => {
-                let head_constrs = self
-                    .lookup_constructor_data_def(head_arm.constr.as_str())?
-                    .constrs
-                    .keys()
-                    .cloned()
-                    .collect();
-                let mut head_ot = self.infer_case_arm(head_arm)?;
-                let mut covered_constructors = HashSet::new();
-                covered_constructors.insert(head_arm.constr.clone());
+    // fn infer_op(&self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
+    //     match op {
+    //         Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
+    //         Op::Name { value: n, .. } => {
+    //             let op_type = self
+    //                 .lookup_op_optype(n)
+    //                 .ok_or_else(|| InferenceErrorMessage::UnknownOp(n.clone()))?;
+    //             Ok(self.instantiate_op(op_type))
+    //         }
+    //         Op::Case { head_arm, arms, .. } => {
+    //             let mut head_ot = self.infer_case_arm(head_arm)?;
 
-                let mut s = Subst::new();
-                for arm in arms {
-                    if !covered_constructors.insert(arm.constr.clone()) {
-                        return Err(InferenceErrorMessage::DuplicateConstructor(
-                            arm.constr.clone(),
-                        ));
-                    }
-                    let mut arm_ot = self.infer_case_arm(arm)?;
-                    (head_ot, arm_ot) = self.augment_op_bw(head_ot, arm_ot);
-                    let new_s = self.unify_op_bw(&head_ot, &arm_ot)?;
-                    s = compose(s, new_s);
-                    head_ot = head_ot.apply(&s);
-                }
+    //             let mut s = Subst::new();
+    //             for arm in arms {
+    //                 let mut arm_ot = self.infer_case_arm(arm)?;
+    //                 (head_ot, arm_ot) = self.augment_op_bw(head_ot, arm_ot);
+    //                 let new_s = self.unify_op_bw(&head_ot, &arm_ot)?;
+    //                 s = compose(s, new_s);
+    //                 head_ot = head_ot.apply(&s);
+    //             }
 
-                if covered_constructors == head_constrs {
-                    Ok(head_ot)
-                } else {
-                    Err(InferenceErrorMessage::NotAllConstructorsCovered)
-                }
-            }
-            Op::Quote { value: ops, .. } => {
-                let quoted_optype = self.infer(ops).map_err(|error| error.error)?;
-                Ok(OpType {
-                    pre: vec![],
-                    post: vec![Type::Op(quoted_optype)],
-                })
-            }
-            Op::Lambda { name, span } => todo!(),
-            Op::LambdaName { name, span } => todo!(),
-        }
-    }
+    //             Ok(head_ot)
+    //         }
+    //         Op::Quote { value: ops, .. } => {
+    //             let quoted_optype = self.infer(ops).map_err(|error| error.error)?;
+    //             Ok(OpType {
+    //                 pre: vec![],
+    //                 post: vec![Type::Op(quoted_optype)],
+    //             })
+    //         }
+    //         Op::Lambda { name, span } => todo!(),
+    //         Op::LambdaName { name, span } => todo!(),
+    //     }
+    // }
 
     /// Chain two operator types through unification. This includes overflow and underflow chain.
     fn chain(&self, ot1: OpType, ot2: OpType) -> Result<OpType, InferenceErrorMessage> {
@@ -430,6 +419,66 @@ impl<'m> Inference<'m> {
     fn infer(&self, ops: &[Op]) -> Result<OpType, InferenceError> {
         match ops {
             [] => Ok(OpType::empty()),
+            [Op::Literal { value, span }, rest @ ..] => {
+                let t1 = self.lit_optype(value);
+                let t2 = self.infer(rest)?;
+                self.chain(t1, t2).map_err(|error| InferenceError {
+                    error,
+                    span: span.to_owned(),
+                })
+            }
+            [Op::Name { value: name, span }, rest @ ..] => {
+                let op_type = self.lookup_op_optype(name).ok_or_else(|| InferenceError {
+                    error: InferenceErrorMessage::UnknownOp(name.clone()),
+                    span: span.to_owned(),
+                })?;
+                let t1 = self.instantiate_op(op_type);
+                let t2 = self.infer(rest)?;
+                self.chain(t1, t2).map_err(|error| InferenceError {
+                    error,
+                    span: span.to_owned(),
+                })
+            }
+            [Op::Case {
+                head_arm,
+                arms,
+                span,
+            }, rest @ ..] => {
+                let mut head_ot = self.infer_case_arm(head_arm)?;
+
+                let mut s = Subst::new();
+                for arm in arms {
+                    let mut arm_ot = self.infer_case_arm(arm)?;
+                    (head_ot, arm_ot) = self.augment_op_bw(head_ot, arm_ot);
+                    let new_s =
+                        self.unify_op_bw(&head_ot, &arm_ot)
+                            .map_err(|error| InferenceError {
+                                error,
+                                span: span.to_owned(),
+                            })?;
+                    s = compose(s, new_s);
+                    head_ot = head_ot.apply(&s);
+                }
+
+                let t1 = head_ot;
+                let t2 = self.infer(rest)?;
+                self.chain(t1, t2).map_err(|error| InferenceError {
+                    error,
+                    span: span.to_owned(),
+                })
+            }
+            [Op::Quote { value, span }, rest @ ..] => {
+                let quoted_optype = self.infer(value)?;
+                let t1 = OpType {
+                    pre: vec![],
+                    post: vec![Type::Op(quoted_optype)],
+                };
+                let t2 = self.infer(rest)?;
+                self.chain(t1, t2).map_err(|error| InferenceError {
+                    error,
+                    span: span.to_owned(),
+                })
+            }
             [Op::Lambda { name, span }, rest @ ..] => {
                 let (before, after) = splice(rest, name).ok_or_else(|| InferenceError {
                     error: InferenceErrorMessage::UnusedLambdaName {
@@ -448,7 +497,6 @@ impl<'m> Inference<'m> {
                     pre: vec![],
                     post: vec![lambda_poly.clone()],
                 };
-                println!("t1 {:?}, t2 {:?}, t3 {:?}, t4 {:?}", t1, t2, t3, t4);
                 let chained = [t2, t3, t4]
                     .into_iter()
                     .try_fold(t1, |a, t| self.chain(a, t))
@@ -456,39 +504,16 @@ impl<'m> Inference<'m> {
                         error,
                         span: span.to_owned(),
                     })?;
-                println!("chained: {:?}", chained);
                 Ok(chained)
             }
-            [op, rest @ ..] => {
-                let t1 = self.infer_op(op).map_err(|error| InferenceError {
-                    error,
-                    span: op.get_span().to_owned(),
-                })?;
-                let t2 = self.infer(rest)?;
-                self.chain(t1, t2).map_err(|error| InferenceError {
-                    error,
-                    span: op.get_span().to_owned(),
-                })
-            }
+            [Op::LambdaName { name, span }, ..] => Err(InferenceError {
+                error: InferenceErrorMessage::UnexpectedLambdaName {
+                    name: name.to_owned(),
+                },
+                span: span.to_owned(),
+            }),
         }
     }
-
-    // /// Infer the type of a sentence
-    // fn infer(&self, ops: &[Op]) -> Result<OpType, InferenceError> {
-    //     let mut inf_acc = OpType::empty();
-    //     for op in ops {
-    //         let t1 = self.infer_op(op).map_err(|error| InferenceError {
-    //             error,
-    //             span: op.get_span().clone(),
-    //         })?;
-    //         let chained = self.chain(inf_acc, t1).map_err(|error| InferenceError {
-    //             error,
-    //             span: op.get_span().clone(),
-    //         })?;
-    //         inf_acc = chained;
-    //     }
-    //     Ok(inf_acc)
-    // }
 }
 
 /// Splice the operator list at the first usage of the target name. Supports lambda name shadowing.
