@@ -1,0 +1,9 @@
+data Foo: foo.
+data Bar: bar.
+data Baz: baz.
+
+define [Foo, Bar] foobartobaz [Baz]: pop pop baz.
+
+define [] main [Baz, Foo, Foo]:
+    foo \ $f bar $f foobartobaz
+    \ $x foo foo $x.

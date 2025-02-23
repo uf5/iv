@@ -28,6 +28,7 @@ pub enum InferenceErrorMessage {
     TypeOrderErrorElem { general: Type, concrete: Type },
     TypeOrderErrorOp { general: OpType, concrete: OpType },
     OpPrePostLenNeq { general: OpType, concrete: OpType },
+    UnusedLambdaName { name: String },
 }
 
 type Subst = HashMap<String, Type>;
@@ -429,6 +430,35 @@ impl<'m> Inference<'m> {
     fn infer(&self, ops: &[Op]) -> Result<OpType, InferenceError> {
         match ops {
             [] => Ok(OpType::empty()),
+            [Op::Lambda { name, span }, rest @ ..] => {
+                let (before, after) = splice(rest, name).ok_or_else(|| InferenceError {
+                    error: InferenceErrorMessage::UnusedLambdaName {
+                        name: name.to_owned(),
+                    },
+                    span: span.to_owned(),
+                })?;
+                let lambda_poly = self.gen_name();
+                let t2 = self.infer(before)?;
+                let t1 = OpType {
+                    pre: vec![lambda_poly.clone()],
+                    post: vec![],
+                };
+                let t4 = self.infer(after)?;
+                let t3 = OpType {
+                    pre: vec![],
+                    post: vec![lambda_poly.clone()],
+                };
+                println!("t1 {:?}, t2 {:?}, t3 {:?}, t4 {:?}", t1, t2, t3, t4);
+                let chained = [t2, t3, t4]
+                    .into_iter()
+                    .try_fold(t1, |a, t| self.chain(a, t))
+                    .map_err(|error| InferenceError {
+                        error,
+                        span: span.to_owned(),
+                    })?;
+                println!("chained: {:?}", chained);
+                Ok(chained)
+            }
             [op, rest @ ..] => {
                 let t1 = self.infer_op(op).map_err(|error| InferenceError {
                     error,
@@ -476,7 +506,10 @@ fn splice<'a>(ops: &'a [Op], name: &str) -> Option<(&'a [Op], &'a [Op])> {
             Op::LambdaName { name: lname, .. } if lname == name => {
                 if shadowing_depth == 0 {
                     // found the usage of the target name, return the split
-                    return Some(ops.split_at(i));
+                    let (before, [_, after @ ..]) = ops.split_at(i) else {
+                        unreachable!()
+                    };
+                    return Some((before, after));
                 } else {
                     // otherwise, found the usage of the shadowing name, decrement the shadowing
                     // depth
