@@ -354,41 +354,6 @@ impl<'m> Inference<'m> {
             .or_else(|| self.get_user_optype(name))
     }
 
-    // fn infer_op(&self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
-    //     match op {
-    //         Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
-    //         Op::Name { value: n, .. } => {
-    //             let op_type = self
-    //                 .lookup_op_optype(n)
-    //                 .ok_or_else(|| InferenceErrorMessage::UnknownOp(n.clone()))?;
-    //             Ok(self.instantiate_op(op_type))
-    //         }
-    //         Op::Case { head_arm, arms, .. } => {
-    //             let mut head_ot = self.infer_case_arm(head_arm)?;
-
-    //             let mut s = Subst::new();
-    //             for arm in arms {
-    //                 let mut arm_ot = self.infer_case_arm(arm)?;
-    //                 (head_ot, arm_ot) = self.augment_op_bw(head_ot, arm_ot);
-    //                 let new_s = self.unify_op_bw(&head_ot, &arm_ot)?;
-    //                 s = compose(s, new_s);
-    //                 head_ot = head_ot.apply(&s);
-    //             }
-
-    //             Ok(head_ot)
-    //         }
-    //         Op::Quote { value: ops, .. } => {
-    //             let quoted_optype = self.infer(ops).map_err(|error| error.error)?;
-    //             Ok(OpType {
-    //                 pre: vec![],
-    //                 post: vec![Type::Op(quoted_optype)],
-    //             })
-    //         }
-    //         Op::Lambda { name, span } => todo!(),
-    //         Op::LambdaName { name, span } => todo!(),
-    //     }
-    // }
-
     /// Chain two operator types through unification. This includes overflow and underflow chain.
     fn chain(&self, ot1: OpType, ot2: OpType) -> Result<OpType, InferenceErrorMessage> {
         let OpType {
@@ -444,19 +409,39 @@ impl<'m> Inference<'m> {
                 arms,
                 span,
             }, rest @ ..] => {
-                let mut head_ot = self.infer_case_arm(head_arm)?;
+                // ensure that all constructors of the data type are covered
+                let matched_data_type = self
+                    .lookup_constructor_data_def(&head_arm.constr)
+                    .ok_or_else(|| InferenceError {
+                        error: InferenceErrorMessage::UnknownConstructor(
+                            head_arm.constr.to_owned(),
+                        ),
+                        span: span.to_owned(),
+                    })?;
 
-                let mut s = Subst::new();
+                let matched_data_type_constr_names: HashSet<_> =
+                    matched_data_type.constrs.keys().collect();
+                let covered_constr_names: HashSet<_> = once(&head_arm.constr)
+                    .chain(arms.iter().map(|arm| &arm.constr))
+                    .collect();
+
+                if matched_data_type_constr_names != covered_constr_names {
+                    return Err(InferenceError {
+                        error: InferenceErrorMessage::NotAllConstructorsCovered,
+                        span: span.to_owned(),
+                    });
+                }
+
+                let mut head_ot = self.infer_case_arm(head_arm)?;
                 for arm in arms {
                     let mut arm_ot = self.infer_case_arm(arm)?;
                     (head_ot, arm_ot) = self.augment_op_bw(head_ot, arm_ot);
-                    let new_s =
+                    let s =
                         self.unify_op_bw(&head_ot, &arm_ot)
                             .map_err(|error| InferenceError {
                                 error,
                                 span: span.to_owned(),
                             })?;
-                    s = compose(s, new_s);
                     head_ot = head_ot.apply(&s);
                 }
 
