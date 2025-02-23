@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::once;
 use std::iter::zip;
+use std::sync::atomic::AtomicUsize;
 
 use super::types::*;
 use crate::syntax::ast::*;
@@ -118,7 +119,7 @@ pub struct Inference<'m> {
     module: &'m Module,
     constr_maps: ModuleConstrMaps<'m>,
     optype_maps: ModuleConstrOpTypeMap<'m>,
-    counter: usize,
+    counter: AtomicUsize,
 }
 
 impl<'m> Inference<'m> {
@@ -129,11 +130,11 @@ impl<'m> Inference<'m> {
             module,
             constr_maps,
             optype_maps,
-            counter: 0,
+            counter: AtomicUsize::new(0),
         }
     }
 
-    pub fn typecheck(&mut self) -> Result<(), InferenceError> {
+    pub fn typecheck(&self) -> Result<(), InferenceError> {
         for (op_name, op_def) in self.module.op_defs.iter() {
             if op_name.starts_with("noc") {
                 continue;
@@ -149,7 +150,7 @@ impl<'m> Inference<'m> {
         Ok(())
     }
 
-    fn inf_vs_ann(&mut self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
+    fn inf_vs_ann(&self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
         // augment stacks toward the annotation
         let inf = self.augment_towards(inf, ann);
         let s = self.unify_op_ow(&inf, ann)?;
@@ -166,13 +167,15 @@ impl<'m> Inference<'m> {
         Ok(())
     }
 
-    fn gen_name(&mut self) -> Type {
-        let name = format!("_gen_{}", self.counter);
-        self.counter += 1;
+    fn gen_name(&self) -> Type {
+        let n = self
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let name = format!("_gen_{}", n);
         Type::Poly(name)
     }
 
-    fn instantiate_op(&mut self, op: OpType) -> OpType {
+    fn instantiate_op(&self, op: OpType) -> OpType {
         let new_var_subst = op
             .ftv()
             .iter()
@@ -182,7 +185,7 @@ impl<'m> Inference<'m> {
     }
 
     fn unify_list_bw(
-        &mut self,
+        &self,
         s: Subst,
         l1: &[Type],
         l2: &[Type],
@@ -194,7 +197,7 @@ impl<'m> Inference<'m> {
     }
 
     fn unify_list_ow(
-        &mut self,
+        &self,
         s: Subst,
         general: &[Type],
         concrete: &[Type],
@@ -205,13 +208,13 @@ impl<'m> Inference<'m> {
         })
     }
 
-    fn unify_op_bw(&mut self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
+    fn unify_op_bw(&self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
         self.unify_op_ow(o1, o2)
             .or_else(|_| self.unify_op_ow(o2, o1))
     }
 
     fn unify_op_ow(
-        &mut self,
+        &self,
         general: &OpType,
         concrete: &OpType,
     ) -> Result<Subst, InferenceErrorMessage> {
@@ -237,21 +240,13 @@ impl<'m> Inference<'m> {
         self.unify_list_ow(s1, &aug_general.post, &concrete.post)
     }
 
-    fn unify_bw(
-        &mut self,
-        general: &Type,
-        concrete: &Type,
-    ) -> Result<Subst, InferenceErrorMessage> {
+    fn unify_bw(&self, general: &Type, concrete: &Type) -> Result<Subst, InferenceErrorMessage> {
         self.unify_ow(general, concrete)
             .or_else(|_| self.unify_ow(concrete, general))
     }
 
     /// one way type unification: general <= concrete
-    fn unify_ow(
-        &mut self,
-        general: &Type,
-        concrete: &Type,
-    ) -> Result<Subst, InferenceErrorMessage> {
+    fn unify_ow(&self, general: &Type, concrete: &Type) -> Result<Subst, InferenceErrorMessage> {
         match (general, concrete) {
             (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
             (Type::Poly(p1), Type::Poly(p2)) if p1 == p2 => Ok(Subst::new()),
@@ -270,7 +265,7 @@ impl<'m> Inference<'m> {
     }
 
     /// Augments the first argument's pre and post stacks towards the target
-    fn augment_towards(&mut self, mut aug: OpType, target: &OpType) -> OpType {
+    fn augment_towards(&self, mut aug: OpType, target: &OpType) -> OpType {
         while aug.pre.len() < target.pre.len() && aug.post.len() < target.post.len() {
             let new_var = self.gen_name();
             aug.pre.push(new_var.clone());
@@ -280,7 +275,7 @@ impl<'m> Inference<'m> {
     }
 
     /// augment both optypes aso that both optypes have the same stacks lengths
-    fn augment_both(&mut self, o1: OpType, o2: OpType) -> (OpType, OpType) {
+    fn augment_both(&self, o1: OpType, o2: OpType) -> (OpType, OpType) {
         let o1 = self.augment_towards(o1, &o2);
         let o2 = self.augment_towards(o2, &o1);
         (o1, o2)
@@ -319,7 +314,7 @@ impl<'m> Inference<'m> {
             .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
     }
 
-    fn infer_case_arm(&mut self, arm: &CaseArm) -> Result<OpType, InferenceErrorMessage> {
+    fn infer_case_arm(&self, arm: &CaseArm) -> Result<OpType, InferenceErrorMessage> {
         let constr_ot = self.lookup_constructor_optype(arm.constr.as_str())?;
         let body_optype = self.infer(&arm.body).map_err(|error| error.error)?;
         // create a destructor from the constructor op type and instantiate it
@@ -352,7 +347,7 @@ impl<'m> Inference<'m> {
             .or_else(|| self.get_user_optype(name))
     }
 
-    fn infer_op(&mut self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
+    fn infer_op(&self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
         match op {
             Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
             Op::Name { value: n, .. } => {
@@ -399,13 +394,13 @@ impl<'m> Inference<'m> {
                     post: vec![Type::Op(quoted_optype)],
                 })
             }
-            Op::Lambda { names, span } => todo!(),
+            Op::Lambda { name, span } => todo!(),
             Op::LambdaName { name, span } => todo!(),
         }
     }
 
     /// Chain two operator types through unification. This includes overflow and underflow chain.
-    fn chain(&mut self, ot1: OpType, ot2: OpType) -> Result<OpType, InferenceErrorMessage> {
+    fn chain(&self, ot1: OpType, ot2: OpType) -> Result<OpType, InferenceErrorMessage> {
         let OpType {
             pre: alpha,
             post: beta,
@@ -431,21 +426,67 @@ impl<'m> Inference<'m> {
     }
 
     /// Infer the type of a sentence
-    fn infer(&mut self, ops: &[Op]) -> Result<OpType, InferenceError> {
-        let mut inf_acc = OpType::empty();
-        for op in ops {
-            let t1 = self.infer_op(op).map_err(|error| InferenceError {
-                error,
-                span: op.get_span().clone(),
-            })?;
-            let chained = self.chain(inf_acc, t1).map_err(|error| InferenceError {
-                error,
-                span: op.get_span().clone(),
-            })?;
-            inf_acc = chained;
+    fn infer(&self, ops: &[Op]) -> Result<OpType, InferenceError> {
+        match ops {
+            [] => Ok(OpType::empty()),
+            [op, rest @ ..] => {
+                let t1 = self.infer_op(op).map_err(|error| InferenceError {
+                    error,
+                    span: op.get_span().to_owned(),
+                })?;
+                let t2 = self.infer(rest)?;
+                self.chain(t1, t2).map_err(|error| InferenceError {
+                    error,
+                    span: op.get_span().to_owned(),
+                })
+            }
         }
-        Ok(inf_acc)
     }
+
+    // /// Infer the type of a sentence
+    // fn infer(&self, ops: &[Op]) -> Result<OpType, InferenceError> {
+    //     let mut inf_acc = OpType::empty();
+    //     for op in ops {
+    //         let t1 = self.infer_op(op).map_err(|error| InferenceError {
+    //             error,
+    //             span: op.get_span().clone(),
+    //         })?;
+    //         let chained = self.chain(inf_acc, t1).map_err(|error| InferenceError {
+    //             error,
+    //             span: op.get_span().clone(),
+    //         })?;
+    //         inf_acc = chained;
+    //     }
+    //     Ok(inf_acc)
+    // }
+}
+
+/// Splice the operator list at the first usage of the target name. Supports lambda name shadowing.
+fn splice<'a>(ops: &'a [Op], name: &str) -> Option<(&'a [Op], &'a [Op])> {
+    let mut shadowing_depth: usize = 0;
+    for (i, op) in ops.iter().enumerate() {
+        match op {
+            Op::Lambda {
+                name: other_name, ..
+            } if other_name.as_str() == name => {
+                // if we encounter a lambda expression with the same name, shadowing the target
+                // name, increment the shadowing depth
+                shadowing_depth += 1;
+            }
+            Op::LambdaName { name: lname, .. } if lname == name => {
+                if shadowing_depth == 0 {
+                    // found the usage of the target name, return the split
+                    return Some(ops.split_at(i));
+                } else {
+                    // otherwise, found the usage of the shadowing name, decrement the shadowing
+                    // depth
+                    shadowing_depth -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 #[cfg(test)]

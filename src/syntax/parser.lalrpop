@@ -79,10 +79,10 @@ Op: Op = {
         let span = Span { start, end };
         Op::Case { head_arm, arms, span }
     },
-    <start:@L> "\\" <names:"lident"*> "->" <end:@L> => {
-        let names = names.into_iter().map(|x| x.to_owned()).collect();
+    <start:@L> "\\" <name:"lambdaident"> <end:@L> => {
+        let name = name.to_owned();
         let span = Span { start, end };
-        Op::Lambda { names, span }
+        Op::Lambda { name, span }
     },
     <start:@L> <name:"lambdaident"> <end:@R> => {
         let name = name.to_owned();

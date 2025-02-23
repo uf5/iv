@@ -65,7 +65,7 @@ pub enum Op {
         span: Span,
     },
     Lambda {
-        names: Vec<String>,
+        name: String,
         span: Span,
     },
     LambdaName {
