@@ -55,7 +55,6 @@ impl<'m> Evaluator<'m> {
 
     fn eval(&mut self, op: &Op) {
         match op {
-            Op::Ann { value, .. } => self.eval(value),
             Op::Literal { .. } => unimplemented!("literals"),
             Op::Name { value: op_name, .. } => {
                 if let Some([n]) = parse_parametric("br-", op_name) {
@@ -131,6 +130,7 @@ impl<'m> Evaluator<'m> {
             Op::Quote { value: ops, .. } => self
                 .stack
                 .push(Value::Quoted(Quoted::Sentence { ops: ops.clone() })),
+            Op::Lambda { names } => todo!(),
         }
     }
 }

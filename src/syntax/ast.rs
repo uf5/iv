@@ -64,10 +64,8 @@ pub enum Op {
         arms: Vec<CaseArm>,
         span: Span,
     },
-    Ann {
-        value: Box<Op>,
-        ann: OpType,
-        span: Span,
+    Lambda {
+        names: Vec<String>,
     },
 }
 
@@ -79,7 +77,7 @@ impl Op {
             Op::Name { span, .. } => span,
             Op::Quote { span, .. } => span,
             Op::Case { span, .. } => span,
-            Op::Ann { span, .. } => span,
+            Op::Lambda { names } => todo!(),
         }
     }
 }

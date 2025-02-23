@@ -42,6 +42,11 @@ pub enum Token<'source> {
     #[token(",")]
     Comma,
 
+    #[token("\\")]
+    Lambda,
+    #[token("->")]
+    Arrow,
+
     #[token("[")]
     BracketOpen,
     #[token("]")]

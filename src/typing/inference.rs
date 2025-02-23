@@ -354,11 +354,6 @@ impl<'m> Inference<'m> {
 
     fn infer_op(&mut self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
         match op {
-            Op::Ann { value, ann, .. } => {
-                let inf = self.infer_op(value)?;
-                self.inf_vs_ann(inf.clone(), ann)?;
-                Ok(self.instantiate_op(ann.clone()))
-            }
             Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
             Op::Name { value: n, .. } => {
                 let op_type = self
@@ -404,6 +399,7 @@ impl<'m> Inference<'m> {
                     post: vec![Type::Op(quoted_optype)],
                 })
             }
+            Op::Lambda { names } => todo!(),
         }
     }
 
