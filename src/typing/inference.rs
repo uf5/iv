@@ -399,7 +399,8 @@ impl<'m> Inference<'m> {
                     post: vec![Type::Op(quoted_optype)],
                 })
             }
-            Op::Lambda { names } => todo!(),
+            Op::Lambda { names, span } => todo!(),
+            Op::LambdaName { name, span } => todo!(),
         }
     }
 

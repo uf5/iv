@@ -130,7 +130,8 @@ impl<'m> Evaluator<'m> {
             Op::Quote { value: ops, .. } => self
                 .stack
                 .push(Value::Quoted(Quoted::Sentence { ops: ops.clone() })),
-            Op::Lambda { names } => todo!(),
+            Op::Lambda { names, span } => todo!(),
+            Op::LambdaName { name, span } => todo!(),
         }
     }
 }

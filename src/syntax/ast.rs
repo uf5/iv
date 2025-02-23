@@ -66,6 +66,11 @@ pub enum Op {
     },
     Lambda {
         names: Vec<String>,
+        span: Span,
+    },
+    LambdaName {
+        name: String,
+        span: Span,
     },
 }
 
@@ -77,7 +82,8 @@ impl Op {
             Op::Name { span, .. } => span,
             Op::Quote { span, .. } => span,
             Op::Case { span, .. } => span,
-            Op::Lambda { names } => todo!(),
+            Op::Lambda { span, .. } => span,
+            Op::LambdaName { span, .. } => span,
         }
     }
 }
