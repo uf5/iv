@@ -19,4 +19,9 @@ impl OpType {
             post: vec![],
         }
     }
+
+    pub fn augment(&mut self, t: Type) {
+        self.pre.push(t.clone());
+        self.post.push(t.clone());
+    }
 }

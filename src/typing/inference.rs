@@ -470,17 +470,19 @@ impl<'m> Inference<'m> {
                     },
                     span: span.to_owned(),
                 })?;
-                let lambda_poly = self.gen_name();
                 let t2 = self.infer(before)?;
-                let t1 = OpType {
-                    pre: vec![lambda_poly.clone()],
-                    post: vec![],
-                };
+                // bury the element for it to be the topmost element after t2 input parameters,
+                // triggering an augmentation
+                let t1 = self.instantiate_op(
+                    self.get_prelude_optype(&format!("br-{}", t2.pre.len()))
+                        .unwrap(),
+                );
+                // dig up the previously buried element
+                let t3 = self.instantiate_op(
+                    self.get_prelude_optype(&format!("dg-{}", t2.post.len()))
+                        .unwrap(),
+                );
                 let t4 = self.infer(after)?;
-                let t3 = OpType {
-                    pre: vec![],
-                    post: vec![lambda_poly.clone()],
-                };
                 let chained = [t2, t3, t4]
                     .into_iter()
                     .try_fold(t1, |a, t| self.chain(a, t))
