@@ -1,0 +1,221 @@
+\documentclass{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{tabularx}
+
+\newcommand{\op}[3]{[#1] \texttt{#2} [#3]}
+
+\title{Type system for a stack-based programming language}
+
+\begin{document}
+
+\maketitle
+
+\section*{Introduction}
+TBA
+
+\section*{Language}
+
+\subsection*{Declarations}
+
+\subsubsection*{Data declaration}
+The data types are represented by Algebraic Data Types (ADT) in the language.
+\begin{verbatim}
+data Either a b:
+  [a] left,
+  [b] right.
+\end{verbatim}
+If a constructor does not take any types its input parameters can be omitted.
+\begin{verbatim}
+data Maybe a:
+  nothing.
+  [a] just,
+\end{verbatim}
+ADT's can be recursive.
+\begin{verbatim}
+data Nat:
+  zero,
+  [Nat] suc.
+\end{verbatim}
+
+\subsection*{Operator declaration}
+The operators are represented by a sequence of operators. All operator
+definitions must have a type annotation.
+\begin{verbatim}
+define [Nat, Nat] add [Nat]:
+  case { zero { }, suc { add suc } }.
+
+define [Nat] addThree [Nat]:
+  zero suc suc suc add.
+\end{verbatim}
+An operator's body can be empty
+\begin{verbatim}
+define [] nop []:.
+\end{verbatim}
+
+\subsection*{Prelude}
+Prelude operators are split into two groups: parametric and non-parametric.
+Parametric operators take additional number parameters in their name.
+
+\subsubsection*{Non-parametric}
+\begin{itemize}
+\item \texttt{pop} \\
+  Delete the top element.
+\item \texttt{dup} \\
+  Duplicate the top element.
+\item \texttt{quote} \\
+  Create a first class function from the top element.
+\end{itemize}
+
+\subsubsection*{Parametric}
+\begin{itemize}
+\item \texttt{br-n} \\
+  Bury the top element to n-th position.
+\item \texttt{dg-n} \\
+  Dig up the n-th element to the top.
+\item \texttt{comp-x-y-z-w} \\
+  Compose two FCF into one FCF. Takes two input arguments. \\
+  First (topmost) input argument is an FCF that takes $z$ input arguments,
+  returns $w$ output arguments, and is executed second. \\
+  Second input argument is an FCF that takes $x$ input arguments, returns $y$
+  output arguments, and is executed first. \\
+\item \texttt{exec-x-y} \\
+  First class function execution. \\
+  First (topmost) input argument. is an FCF that takes $x$ input arguments,
+  returns $y$ output arguments. \\
+  The rest $x$ input arguments are FCF input arguments. \\
+  The $y$ output arguments are FCF output arguments. \\
+\end{itemize}
+
+\section*{Type system}
+\subsection*{Operator Type separation}
+\begin{itemize}
+\item \textbf{Type} - represents the type of a value stored on the stack.
+\item \textbf{Operator Type} - represents the type of an element of an operator body.
+\end{itemize}
+
+\subsection*{Notation}
+
+\begin{itemize}
+\item ``$\op{\textit{pre}}{}{\textit{post}}$'' represents an operator
+  type. Where \textit{pre} and \textit{post} represent the input and output
+  parameters.
+\item An operator(s) between the stack descriptions is a shorthand,
+  e.g., writing $\op{a, b}{foo bar}{c, d}$ is equivalent to
+  $\texttt{foo bar} : \op{a, b}{}{c, d}$
+\item The leftmost element in the stack type description is the most
+  recently pushed, e.g., $\op{}{foo bar baz}{Baz, Bar, Foo}$.
+\end{itemize}
+
+\subsection*{Most General Unifier for lists}
+\begin{equation*}
+  \begin{array}{ll}
+    \text{listmgu} \: [] \: [] & = \{ \} \\
+    \text{listmgu} \: [t1:r1] \: [t2:r2] & =
+      \text{let} \: s := \text{mgu} \: t1 \: t2 \\
+      \: & \quad \text{in} \: \text{listmgu} \: (s r1) \: (s r2) \\
+  \end{array}
+\end{equation*}
+
+\subsection*{Specialization Rule (Type)}
+\begin{equation*}
+  \tag{Type spec}
+  \frac{
+    t' = \{ a \mapsto a' \} t
+  }{
+    t \sqsubseteq t'
+  }
+\end{equation*}
+
+\subsection*{Specialization Rule (Operator Type)}
+\begin{equation*}
+  \tag{Op spec}
+  \frac{
+    \op{\alpha'}{}{\beta'} = \{ a \mapsto a' \} \op{\alpha}{}{\beta}
+  }{
+    \op{\alpha}{}{\beta} \sqsubseteq \op{\alpha'}{}{\beta'}
+  }
+\end{equation*}
+
+\subsection*{Operator Augmentation}
+\begin{equation*}
+  \tag{Op aug}
+  \frac{
+    \op{\alpha}{}{\beta} \sqsubseteq \op{\alpha'}{}{\beta'}
+  }{
+    \op{\alpha}{}{\beta} \sqsubseteq \op{\alpha' \cdot \gamma}{}{\beta' \cdot \gamma}
+  }
+\end{equation*}
+
+\subsection*{Name rule}
+\begin{equation*}
+  \tag{Name}
+  \frac{
+    \op{\alpha'}{op}{\beta'} \in \Gamma \quad
+    \op{\alpha}{}{\beta} = \text{inst}(\op{\alpha'}{}{\beta'})
+  }{
+    \Gamma \vdash \op{\alpha}{op}{\beta}
+  }
+\end{equation*}
+
+\subsection*{Chain rule}
+\begin{equation*}
+  \tag{Chain}
+  \frac{
+    \begin{array}{ll}
+      \multicolumn{2}{c}{\text{listmgu}(\beta, \psi)} \\
+      \Gamma \vdash \op{\alpha'}{x}{\beta'} \sqsubseteq \op{\alpha}{}{\beta} &
+      \Gamma \vdash \op{\psi'}{y}{\omega'} \sqsubseteq \op{\psi}{}{\omega} \\
+    \end{array}
+  }{
+    \Gamma \vdash \op{\alpha}{x y}{\omega}
+  }
+\end{equation*}
+
+\subsection*{Case rule}
+\begin{equation*}
+  \tag{Chain}
+  \frac{
+    \begin{array}{ll}
+      \Gamma \vdash \op{}{constr1$^{-1}$ body1}{} &
+      \Gamma \vdash \op{}{}{} \\
+    \end{array}
+  }{
+    \Gamma \vdash \op{\alpha}{case\{constr1\{body1\},...\}}{\beta}
+  }
+\end{equation*}
+
+\subsection*{Comp rule}
+\begin{equation*}
+  \tag{Comp}
+  \frac{
+    \begin{array}{ll}
+      \multicolumn{2}{c}{\text{listmgu}(\beta, \psi)} \\
+      \Gamma \vdash \op{\alpha'}{}{\beta'} \sqsubseteq \op{\alpha}{}{\beta} &
+      \Gamma \vdash \op{\psi'}{}{\omega'} \sqsubseteq \op{\psi}{}{\omega} \\
+      \multicolumn{2}{c}{
+        || \alpha' || = m \quad
+        || \beta' || = n \quad
+        || \psi' || = x \quad
+        || \omega' || = y
+      } \\
+    \end{array}
+  }{
+    \Gamma \vdash \op{\op{\alpha'}{}{\beta'}, \op{\psi'}{}{\omega'}}{comp-m-n-x-y}{\op{\alpha}{}{\omega}}
+  }
+\end{equation*}
+
+\subsection*{Exec rule}
+\begin{equation*}
+  \tag{Exec}
+  \frac{
+      || \alpha' || = m \quad
+      || \beta' || = n
+  }{
+    \Gamma \vdash \op{\op{\alpha}{}{\beta} , \alpha}{exec-m-n}{beta}
+  }
+\end{equation*}
+
+\end{document}
