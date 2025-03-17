@@ -384,6 +384,7 @@ impl<'m> Inference<'m> {
             Op::Literal { value, .. } => Ok(self.lit_optype(value)),
             Op::Name { value: name, span } => self
                 .lookup_op_optype(name)
+                .map(|op| self.instantiate_op(op))
                 .ok_or_else(|| InferenceErrorMessage::UnknownOp {
                     name: name.to_owned(),
                 })
