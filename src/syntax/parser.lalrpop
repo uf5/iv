@@ -79,16 +79,6 @@ Op: Op = {
         let span = Span { start, end };
         Op::Case { head_arm, arms, span }
     },
-    <start:@L> "\\" <name:"lambdaident"> <end:@L> => {
-        let name = name.to_owned();
-        let span = Span { start, end };
-        Op::Lambda { name, span }
-    },
-    <start:@L> <name:"lambdaident"> <end:@R> => {
-        let name = name.to_owned();
-        let span = Span { start, end };
-        Op::LambdaName { name, span }
-    },
 };
 
 Literal: Literal = {
@@ -121,13 +111,11 @@ extern {
         "num" => Token::Number(<i32>),
         "lident" => Token::LIdent(<&'input str>),
         "uident" => Token::UIdent(<&'input str>),
-        "lambdaident" => Token::LambdaIdent(<&'input str>),
         "define" => Token::Define,
         "data" => Token::Data,
         "case" => Token::Case,
         ":" => Token::Colon,
         "," => Token::Comma,
-        "\\" => Token::Lambda,
         "->" => Token::Arrow,
         "[" => Token::BracketOpen,
         "]" => Token::BracketClose,

@@ -15,8 +15,6 @@ pub struct Evaluator<'m> {
     module: &'m Module,
     constr_maps: ModuleConstrMaps<'m>,
     pub stack: Vec<Value>,
-    // TODO: this is terrible
-    pub lambdas: Vec<(String, Value)>,
 }
 
 impl<'m> Evaluator<'m> {
@@ -26,7 +24,6 @@ impl<'m> Evaluator<'m> {
             module,
             constr_maps,
             stack: vec![],
-            lambdas: vec![],
         }
     }
 
@@ -133,19 +130,6 @@ impl<'m> Evaluator<'m> {
             Op::Quote { value: ops, .. } => self
                 .stack
                 .push(Value::Quoted(Quoted::Sentence { ops: ops.clone() })),
-            Op::Lambda { name, .. } => {
-                let value = self.pop();
-                self.lambdas.push((name.to_owned(), value))
-            }
-            Op::LambdaName { name, .. } => {
-                let index = self
-                    .lambdas
-                    .iter()
-                    .position(|(vname, _)| vname == name)
-                    .expect(&format!("undefined lambda name: {}", name));
-                let v = self.lambdas.remove(index).1;
-                self.stack.push(v);
-            }
         }
     }
 }

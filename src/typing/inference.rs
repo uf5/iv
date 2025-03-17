@@ -379,36 +379,30 @@ impl<'m> Inference<'m> {
         }
     }
 
-    /// Infer the type of a sentence
-    fn infer(&self, ops: &[Op]) -> Result<OpType, InferenceError> {
-        match ops {
-            [] => Ok(OpType::empty()),
-            [Op::Literal { value, span }, rest @ ..] => {
-                let t1 = self.lit_optype(value);
-                let t2 = self.infer(rest)?;
-                self.chain(t1, t2).map_err(|error| InferenceError {
+    fn infer_op(&self, op: &Op) -> Result<OpType, InferenceError> {
+        match op {
+            Op::Literal { value, .. } => Ok(self.lit_optype(value)),
+            Op::Name { value: name, span } => self
+                .lookup_op_optype(name)
+                .ok_or_else(|| InferenceErrorMessage::UnknownOp {
+                    name: name.to_owned(),
+                })
+                .map_err(|error| InferenceError {
                     error,
                     span: span.to_owned(),
+                }),
+            Op::Quote { value, .. } => {
+                let quoted_optype = self.infer(value)?;
+                Ok(OpType {
+                    pre: vec![],
+                    post: vec![Type::Op(quoted_optype)],
                 })
             }
-            [Op::Name { value: name, span }, rest @ ..] => {
-                let op_type = self.lookup_op_optype(name).ok_or_else(|| InferenceError {
-                    error: InferenceErrorMessage::UnknownOp { name: name.clone() },
-                    span: span.to_owned(),
-                })?;
-                let t1 = self.instantiate_op(op_type);
-                let t2 = self.infer(rest)?;
-                self.chain(t1, t2).map_err(|error| InferenceError {
-                    error,
-                    span: span.to_owned(),
-                })
-            }
-            [Op::Case {
+            Op::Case {
                 head_arm,
                 arms,
                 span,
-            }, rest @ ..] => {
-                // ensure that all constructors of the data type are covered
+            } => {
                 let matched_data_type = self
                     .lookup_constructor_data_def(&head_arm.constr)
                     .ok_or_else(|| InferenceError {
@@ -444,91 +438,20 @@ impl<'m> Inference<'m> {
                     head_ot = head_ot.apply(&s);
                 }
 
-                let t1 = head_ot;
-                let t2 = self.infer(rest)?;
-                self.chain(t1, t2).map_err(|error| InferenceError {
-                    error,
-                    span: span.to_owned(),
-                })
+                Ok(head_ot)
             }
-            [Op::Quote { value, span }, rest @ ..] => {
-                let quoted_optype = self.infer(value)?;
-                let t1 = OpType {
-                    pre: vec![],
-                    post: vec![Type::Op(quoted_optype)],
-                };
-                let t2 = self.infer(rest)?;
-                self.chain(t1, t2).map_err(|error| InferenceError {
-                    error,
-                    span: span.to_owned(),
-                })
-            }
-            [Op::Lambda { name, span }, rest @ ..] => {
-                let (before, after) = splice(rest, name).ok_or_else(|| InferenceError {
-                    error: InferenceErrorMessage::UnusedLambdaName {
-                        name: name.to_owned(),
-                    },
-                    span: span.to_owned(),
-                })?;
-                let t2 = self.infer(before)?;
-                // bury the element for it to be the topmost element after t2 input parameters,
-                // triggering an augmentation
-                let t1 = self.instantiate_op(
-                    self.get_prelude_optype(&format!("br-{}", t2.pre.len()))
-                        .unwrap(),
-                );
-                // dig up the previously buried element
-                let t3 = self.instantiate_op(
-                    self.get_prelude_optype(&format!("dg-{}", t2.post.len()))
-                        .unwrap(),
-                );
-                let t4 = self.infer(after)?;
-                let chained = [t2, t3, t4]
-                    .into_iter()
-                    .try_fold(t1, |a, t| self.chain(a, t))
-                    .map_err(|error| InferenceError {
-                        error,
-                        span: span.to_owned(),
-                    })?;
-                Ok(chained)
-            }
-            [Op::LambdaName { name, span }, ..] => Err(InferenceError {
-                error: InferenceErrorMessage::UnexpectedLambdaName {
-                    name: name.to_owned(),
-                },
-                span: span.to_owned(),
-            }),
         }
     }
-}
 
-/// Splice the operator list at the first usage of the target name. Supports lambda name shadowing.
-fn splice<'a>(ops: &'a [Op], name: &str) -> Option<(&'a [Op], &'a [Op])> {
-    let mut shadowing_depth: usize = 0;
-    for (i, op) in ops.iter().enumerate() {
-        match op {
-            Op::Lambda {
-                name: other_name, ..
-            } if other_name.as_str() == name => {
-                // if we encounter a lambda expression with the same name, shadowing the target
-                // name, increment the shadowing depth
-                shadowing_depth += 1;
-            }
-            Op::LambdaName { name: lname, .. } if lname == name => {
-                if shadowing_depth == 0 {
-                    // found the usage of the target name, return the split
-                    let (before, [_, after @ ..]) = ops.split_at(i) else {
-                        unreachable!()
-                    };
-                    return Some((before, after));
-                } else {
-                    // otherwise, found the usage of the shadowing name, decrement the shadowing
-                    // depth
-                    shadowing_depth -= 1;
-                }
-            }
-            _ => {}
+    fn infer(&self, ops: &[Op]) -> Result<OpType, InferenceError> {
+        let mut acc = OpType::empty();
+        for op in ops {
+            let t = self.infer_op(op)?;
+            acc = self.chain(acc, t).map_err(|error| InferenceError {
+                error,
+                span: op.get_span().clone(),
+            })?;
         }
+        Ok(acc)
     }
-    None
 }

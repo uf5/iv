@@ -64,14 +64,6 @@ pub enum Op {
         arms: Vec<CaseArm>,
         span: Span,
     },
-    Lambda {
-        name: String,
-        span: Span,
-    },
-    LambdaName {
-        name: String,
-        span: Span,
-    },
 }
 
 impl Op {
@@ -82,8 +74,6 @@ impl Op {
             Op::Name { span, .. } => span,
             Op::Quote { span, .. } => span,
             Op::Case { span, .. } => span,
-            Op::Lambda { span, .. } => span,
-            Op::LambdaName { span, .. } => span,
         }
     }
 }

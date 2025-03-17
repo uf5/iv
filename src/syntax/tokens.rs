@@ -30,9 +30,6 @@ pub enum Token<'source> {
     #[regex(r"[A-Z][A-Za-z0-9\-\+]*", |lex| lex.slice())]
     UIdent(&'source str),
 
-    #[regex(r"\$([a-z0-9]*)")]
-    LambdaIdent(&'source str),
-
     #[token("define")]
     Define,
     #[token("data")]
@@ -45,8 +42,6 @@ pub enum Token<'source> {
     #[token(",")]
     Comma,
 
-    #[token("\\")]
-    Lambda,
     #[token("->")]
     Arrow,
 
