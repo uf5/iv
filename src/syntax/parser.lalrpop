@@ -47,7 +47,7 @@ DataConstr: (String, DataConstr) = {
 TypeSingle: Type = {
     <name:"lident"> => Type::Poly(name.to_owned()),
     <name:"uident"> => Type::Mono(name.to_owned()),
-    "[" <pre:Comma<Type>> "]" "[" <post:Comma<Type>> "]" => Type::Op(OpType { pre, post }), 
+    "[" <pre:Comma<Type>> "]" "[" <post:Comma<Type>> "]" => Type::Op(OpType { pre, post }),
     "(" <t:Type> ")" => t,
 };
 
@@ -71,11 +71,6 @@ Op: Op = {
     <start:@L> <lit:Literal> <end:@R> => Op::Literal { value: lit, span: Span { start, end } },
     <start:@L> <name:"lident"> <end:@R> => Op::Name { value: name.to_owned(), span: Span { start, end } },
     <start:@L> "(" <ops:Op*> ")" <end:@R> => Op::Quote { value: ops, span: Span { start, end } },
-    <start:@L> "[" <pre:Comma<Type>> "]" <value:Op> "[" <post:Comma<Type>> "]" <end:@L> => {
-        let span = Span { start, end };
-        let ann = OpType { pre, post };
-	Op::Ann { value: Box::new(value), ann, span }
-    },
     <start:@L> "case" "{" <head_arm:CaseArm> "}" <end:@R> => {
         let span = Span { start, end };
         Op::Case { head_arm, arms: vec![], span }
@@ -91,7 +86,10 @@ Literal: Literal = {
 };
 
 CaseArm: CaseArm = {
-    <constr:"lident"> "{" <body:Op*> "}" => CaseArm { constr: constr.to_owned(), body },
+    <start:@L> <constr:"lident"> "{" <body:Op*> "}" <end:@R> => {
+        let span = Span { start, end };
+        CaseArm { constr: constr.to_owned(), body, span }
+    },
 };
 
 Comma<T>: Vec<T> = {
@@ -118,6 +116,7 @@ extern {
         "case" => Token::Case,
         ":" => Token::Colon,
         "," => Token::Comma,
+        "->" => Token::Arrow,
         "[" => Token::BracketOpen,
         "]" => Token::BracketClose,
         "(" => Token::ParenOpen,

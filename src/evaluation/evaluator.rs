@@ -55,7 +55,6 @@ impl<'m> Evaluator<'m> {
 
     fn eval(&mut self, op: &Op) {
         match op {
-            Op::Ann { value, .. } => self.eval(value),
             Op::Literal { .. } => unimplemented!("literals"),
             Op::Name { value: op_name, .. } => {
                 if let Some([n]) = parse_parametric("br-", op_name) {
@@ -124,7 +123,7 @@ impl<'m> Evaluator<'m> {
                     .into_iter()
                     .chain(rest_arms.iter())
                     .find(|arm| arm.constr == constr_name)
-                    .unwrap_or_else(|| panic!("unknown constructor: {}", &constr_name));
+                    .expect(&format!("unknown constructor: {}", &constr_name));
                 self.stack.extend(args.into_iter().rev());
                 self.eval_sentence(&matching_arm.body);
             }

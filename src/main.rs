@@ -39,7 +39,7 @@ fn main() {
     };
     match cli_args.mode {
         cli::Mode::Typecheck => {
-            let mut inf = Inference::new(&module);
+            let inf = Inference::new(&module);
             match inf.typecheck() {
                 Ok(_) => {
                     println!("success!")

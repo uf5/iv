@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::once;
 use std::iter::zip;
+use std::sync::atomic::AtomicUsize;
 
 use super::types::*;
 use crate::syntax::ast::*;
@@ -16,17 +17,17 @@ pub struct InferenceError {
 
 #[derive(Debug)]
 pub enum InferenceErrorMessage {
-    AnnInfConflict(OpType, OpType),
-    UnificationError(Type, Type),
-    OccursCheckError(String, Type),
-    UnknownOp(String),
-    ChainError,
-    UnknownConstructor(String),
-    DuplicateConstructor(String),
+    AnnInfConflict { inf: OpType, ann: OpType },
+    UnificationError { t1: Type, t2: Type },
+    UnknownOp { name: String },
+    UnknownConstructor { name: String },
+    DuplicateConstructor { name: String },
     NotAllConstructorsCovered,
     TypeOrderErrorElem { general: Type, concrete: Type },
     TypeOrderErrorOp { general: OpType, concrete: OpType },
     OpPrePostLenNeq { general: OpType, concrete: OpType },
+    UnusedLambdaName { name: String },
+    UnexpectedLambdaName { name: String },
 }
 
 type Subst = HashMap<String, Type>;
@@ -118,7 +119,7 @@ pub struct Inference<'m> {
     module: &'m Module,
     constr_maps: ModuleConstrMaps<'m>,
     optype_maps: ModuleConstrOpTypeMap<'m>,
-    counter: usize,
+    counter: AtomicUsize,
 }
 
 impl<'m> Inference<'m> {
@@ -129,17 +130,16 @@ impl<'m> Inference<'m> {
             module,
             constr_maps,
             optype_maps,
-            counter: 0,
+            counter: AtomicUsize::new(0),
         }
     }
 
-    pub fn typecheck(&mut self) -> Result<(), InferenceError> {
+    pub fn typecheck(&self) -> Result<(), InferenceError> {
         for (op_name, op_def) in self.module.op_defs.iter() {
             if op_name.starts_with("noc") {
                 continue;
             }
             let inf = self.infer(&op_def.body)?;
-            println!("for {} inferred {:?}", op_name, inf);
             self.inf_vs_ann(inf, &op_def.ann)
                 .map_err(|error| InferenceError {
                     error,
@@ -149,30 +149,32 @@ impl<'m> Inference<'m> {
         Ok(())
     }
 
-    fn inf_vs_ann(&mut self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
+    fn inf_vs_ann(&self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
         // augment stacks toward the annotation
-        let inf = self.augment_towards(inf, ann);
+        let inf = self.augment_op_ow(inf, ann);
         let s = self.unify_op_ow(&inf, ann)?;
         // ann matches the inf when all subs associated with ftv of annotation are poly
         for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
             match v {
                 Type::Poly(_) => (),
-                _ => Err(InferenceErrorMessage::AnnInfConflict(
-                    ann.clone(),
-                    inf.clone(),
-                ))?,
+                _ => Err(InferenceErrorMessage::AnnInfConflict {
+                    inf: inf.clone(),
+                    ann: ann.clone(),
+                })?,
             }
         }
         Ok(())
     }
 
-    fn gen_name(&mut self) -> Type {
-        let name = format!("_gen_{}", self.counter);
-        self.counter += 1;
+    fn gen_name(&self) -> Type {
+        let n = self
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let name = format!("_gen_{}", n);
         Type::Poly(name)
     }
 
-    fn instantiate_op(&mut self, op: OpType) -> OpType {
+    fn instantiate_op(&self, op: OpType) -> OpType {
         let new_var_subst = op
             .ftv()
             .iter()
@@ -182,7 +184,7 @@ impl<'m> Inference<'m> {
     }
 
     fn unify_list_bw(
-        &mut self,
+        &self,
         s: Subst,
         l1: &[Type],
         l2: &[Type],
@@ -194,7 +196,7 @@ impl<'m> Inference<'m> {
     }
 
     fn unify_list_ow(
-        &mut self,
+        &self,
         s: Subst,
         general: &[Type],
         concrete: &[Type],
@@ -205,13 +207,13 @@ impl<'m> Inference<'m> {
         })
     }
 
-    fn unify_op_bw(&mut self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
+    fn unify_op_bw(&self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
         self.unify_op_ow(o1, o2)
             .or_else(|_| self.unify_op_ow(o2, o1))
     }
 
     fn unify_op_ow(
-        &mut self,
+        &self,
         general: &OpType,
         concrete: &OpType,
     ) -> Result<Subst, InferenceErrorMessage> {
@@ -222,7 +224,7 @@ impl<'m> Inference<'m> {
         // issue since [][Foo] <= [a][Foo, a].
         // in addition, the formalized type inference rules includes the
         // augmentation rule, which, roughly speaking, does not change the type.
-        let aug_general = self.augment_towards(general.clone(), concrete);
+        let aug_general = self.augment_op_ow(general.clone(), concrete);
         // op type pre post stacks length equality check
         if aug_general.pre.len() != concrete.pre.len()
             || aug_general.post.len() != concrete.post.len()
@@ -237,21 +239,13 @@ impl<'m> Inference<'m> {
         self.unify_list_ow(s1, &aug_general.post, &concrete.post)
     }
 
-    fn unify_bw(
-        &mut self,
-        general: &Type,
-        concrete: &Type,
-    ) -> Result<Subst, InferenceErrorMessage> {
+    fn unify_bw(&self, general: &Type, concrete: &Type) -> Result<Subst, InferenceErrorMessage> {
         self.unify_ow(general, concrete)
             .or_else(|_| self.unify_ow(concrete, general))
     }
 
     /// one way type unification: general <= concrete
-    fn unify_ow(
-        &mut self,
-        general: &Type,
-        concrete: &Type,
-    ) -> Result<Subst, InferenceErrorMessage> {
+    fn unify_ow(&self, general: &Type, concrete: &Type) -> Result<Subst, InferenceErrorMessage> {
         match (general, concrete) {
             (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
             (Type::Poly(p1), Type::Poly(p2)) if p1 == p2 => Ok(Subst::new()),
@@ -270,19 +264,19 @@ impl<'m> Inference<'m> {
     }
 
     /// Augments the first argument's pre and post stacks towards the target
-    fn augment_towards(&mut self, mut aug: OpType, target: &OpType) -> OpType {
-        while aug.pre.len() < target.pre.len() && aug.post.len() < target.post.len() {
+    fn augment_op_ow(&self, mut general: OpType, concrete: &OpType) -> OpType {
+        while general.pre.len() < concrete.pre.len() && general.post.len() < concrete.post.len() {
             let new_var = self.gen_name();
-            aug.pre.push(new_var.clone());
-            aug.post.push(new_var.clone());
+            general.pre.push(new_var.clone());
+            general.post.push(new_var.clone());
         }
-        aug
+        general
     }
 
     /// augment both optypes aso that both optypes have the same stacks lengths
-    fn augment_both(&mut self, o1: OpType, o2: OpType) -> (OpType, OpType) {
-        let o1 = self.augment_towards(o1, &o2);
-        let o2 = self.augment_towards(o2, &o1);
+    fn augment_op_bw(&self, o1: OpType, o2: OpType) -> (OpType, OpType) {
+        let o1 = self.augment_op_ow(o1, &o2);
+        let o2 = self.augment_op_ow(o2, &o1);
         (o1, o2)
     }
 
@@ -303,30 +297,37 @@ impl<'m> Inference<'m> {
         }
     }
 
-    fn lookup_constructor_optype(&self, name: &str) -> Result<OpType, InferenceErrorMessage> {
-        self.optype_maps
-            .constr_to_optype_map
-            .get(name)
-            .cloned()
-            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
+    fn lookup_constructor_optype(&self, name: &str) -> Option<&OpType> {
+        self.optype_maps.constr_to_optype_map.get(name)
     }
 
-    fn lookup_constructor_data_def(&self, name: &str) -> Result<&&DataDef, InferenceErrorMessage> {
+    fn lookup_constructor_data_def(&self, name: &str) -> Option<&&DataDef> {
         self.constr_maps
             .constr_to_data_map
             .get(name)
             .map(|(_data_name, data_def)| data_def)
-            .ok_or_else(|| InferenceErrorMessage::UnknownConstructor(name.to_owned()))
     }
 
-    fn infer_case_arm(&mut self, arm: &CaseArm) -> Result<OpType, InferenceErrorMessage> {
-        let constr_ot = self.lookup_constructor_optype(arm.constr.as_str())?;
-        let body_optype = self.infer(&arm.body).map_err(|error| error.error)?;
+    fn infer_case_arm(&self, arm: &CaseArm) -> Result<OpType, InferenceError> {
+        let constr_ot = self
+            .lookup_constructor_optype(arm.constr.as_str())
+            .cloned()
+            .ok_or_else(|| InferenceError {
+                error: InferenceErrorMessage::UnknownConstructor {
+                    name: arm.constr.to_owned(),
+                },
+                span: arm.span.to_owned(),
+            })?;
+        let body_optype = self.infer(&arm.body)?;
         // create a destructor from the constructor op type and instantiate it
         let destr = Self::make_destr(&constr_ot);
         let inst_destr = self.instantiate_op(destr);
         // chain the destructor with the arm body to get the complete op type
         self.chain(inst_destr, body_optype)
+            .map_err(|error| InferenceError {
+                error,
+                span: arm.span.to_owned(),
+            })
     }
 
     fn get_prelude_optype(&self, name: &str) -> Option<OpType> {
@@ -352,63 +353,8 @@ impl<'m> Inference<'m> {
             .or_else(|| self.get_user_optype(name))
     }
 
-    fn infer_op(&mut self, op: &Op) -> Result<OpType, InferenceErrorMessage> {
-        match op {
-            Op::Ann { value, ann, .. } => {
-                let inf = self.infer_op(value)?;
-                self.inf_vs_ann(inf.clone(), ann)?;
-                Ok(self.instantiate_op(ann.clone()))
-            }
-            Op::Literal { value: lit, .. } => Ok(self.lit_optype(lit)),
-            Op::Name { value: n, .. } => {
-                let op_type = self
-                    .lookup_op_optype(n)
-                    .ok_or_else(|| InferenceErrorMessage::UnknownOp(n.clone()))?;
-                Ok(self.instantiate_op(op_type))
-            }
-            Op::Case { head_arm, arms, .. } => {
-                let head_constrs = self
-                    .lookup_constructor_data_def(head_arm.constr.as_str())?
-                    .constrs
-                    .keys()
-                    .cloned()
-                    .collect();
-                let mut head_ot = self.infer_case_arm(head_arm)?;
-                let mut covered_constructors = HashSet::new();
-                covered_constructors.insert(head_arm.constr.clone());
-
-                let mut s = Subst::new();
-                for arm in arms {
-                    if !covered_constructors.insert(arm.constr.clone()) {
-                        return Err(InferenceErrorMessage::DuplicateConstructor(
-                            arm.constr.clone(),
-                        ));
-                    }
-                    let mut arm_ot = self.infer_case_arm(arm)?;
-                    (head_ot, arm_ot) = self.augment_both(head_ot, arm_ot);
-                    let new_s = self.unify_op_bw(&head_ot, &arm_ot)?;
-                    s = compose(s, new_s);
-                    head_ot = head_ot.apply(&s);
-                }
-
-                if covered_constructors == head_constrs {
-                    Ok(head_ot)
-                } else {
-                    Err(InferenceErrorMessage::NotAllConstructorsCovered)
-                }
-            }
-            Op::Quote { value: ops, .. } => {
-                let quoted_optype = self.infer(ops).map_err(|error| error.error)?;
-                Ok(OpType {
-                    pre: vec![],
-                    post: vec![Type::Op(quoted_optype)],
-                })
-            }
-        }
-    }
-
     /// Chain two operator types through unification. This includes overflow and underflow chain.
-    fn chain(&mut self, ot1: OpType, ot2: OpType) -> Result<OpType, InferenceErrorMessage> {
+    fn chain(&self, ot1: OpType, ot2: OpType) -> Result<OpType, InferenceErrorMessage> {
         let OpType {
             pre: alpha,
             post: beta,
@@ -433,723 +379,80 @@ impl<'m> Inference<'m> {
         }
     }
 
-    /// Infer the type of a sentence
-    fn infer(&mut self, ops: &[Op]) -> Result<OpType, InferenceError> {
-        let mut inf_acc = OpType::empty();
-        for op in ops {
-            let t1 = self.infer_op(op).map_err(|error| InferenceError {
-                error,
-                span: op.get_span().clone(),
-            })?;
-            let chained = self.chain(inf_acc, t1).map_err(|error| InferenceError {
-                error,
-                span: op.get_span().clone(),
-            })?;
-            inf_acc = chained;
+    fn infer_op(&self, op: &Op) -> Result<OpType, InferenceError> {
+        match op {
+            Op::Literal { value, .. } => Ok(self.lit_optype(value)),
+            Op::Name { value: name, span } => self
+                .lookup_op_optype(name)
+                .map(|op| self.instantiate_op(op))
+                .ok_or_else(|| InferenceErrorMessage::UnknownOp {
+                    name: name.to_owned(),
+                })
+                .map_err(|error| InferenceError {
+                    error,
+                    span: span.to_owned(),
+                }),
+            Op::Quote { value, .. } => {
+                let quoted_optype = self.infer(value)?;
+                Ok(OpType {
+                    pre: vec![],
+                    post: vec![Type::Op(quoted_optype)],
+                })
+            }
+            Op::Case {
+                head_arm,
+                arms,
+                span,
+            } => {
+                let matched_data_type = self
+                    .lookup_constructor_data_def(&head_arm.constr)
+                    .ok_or_else(|| InferenceError {
+                        error: InferenceErrorMessage::UnknownConstructor {
+                            name: head_arm.constr.to_owned(),
+                        },
+                        span: span.to_owned(),
+                    })?;
+
+                let matched_data_type_constr_names: HashSet<_> =
+                    matched_data_type.constrs.keys().collect();
+                let covered_constr_names: HashSet<_> = once(&head_arm.constr)
+                    .chain(arms.iter().map(|arm| &arm.constr))
+                    .collect();
+
+                if matched_data_type_constr_names != covered_constr_names {
+                    return Err(InferenceError {
+                        error: InferenceErrorMessage::NotAllConstructorsCovered,
+                        span: span.to_owned(),
+                    });
+                }
+
+                let mut head_ot = self.infer_case_arm(head_arm)?;
+                for arm in arms {
+                    let mut arm_ot = self.infer_case_arm(arm)?;
+                    (head_ot, arm_ot) = self.augment_op_bw(head_ot, arm_ot);
+                    let s =
+                        self.unify_op_bw(&head_ot, &arm_ot)
+                            .map_err(|error| InferenceError {
+                                error,
+                                span: span.to_owned(),
+                            })?;
+                    head_ot = head_ot.apply(&s);
+                }
+
+                Ok(head_ot)
+            }
         }
-        Ok(inf_acc)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::syntax::parse;
-    use crate::typing::inference::*;
-
-    #[test]
-    fn sanity() {
-        let input = "
-        define [a, a] nocadd [a]: 1 2 3.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_ok());
     }
 
-    #[test]
-    fn subst_int_ann_vs_inf() {
-        let input = "
-        data Alpha:.
-        define [a, a] nocadd [a]:.
-        define [Alpha, Alpha] intadd [Alpha]: nocadd.";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_ok());
-    }
-
-    #[test]
-    fn ann_ss_pre() {
-        let input = "
-        data Alpha: alpha.
-        define [a, a] nocadd [a]:.
-        define [a, Alpha] intadd [Alpha]: nocadd.";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_err());
-    }
-
-    #[test]
-    fn ann_ss_post() {
-        let input = "
-        data Alpha: alpha.
-        define [a, a] nocadd [a]:.
-        define [Alpha, a] intadd [Alpha]: nocadd.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_err());
-    }
-
-    #[test]
-    fn ann_ss_double() {
-        let input = "
-        data Alpha: alpha.
-        define [a, a] nocadd [a]:.
-        define [a, a] intadd [Alpha]: nocadd.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_err());
-    }
-
-    #[test]
-    fn ann_ss_trans_stack() {
-        let input = "
-        data Alpha: alpha.
-        data Beta: beta.
-        define [a] nocdup [a, a]:.
-        define [Alpha] intadd [Beta, Beta]: nocadd.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_err());
-    }
-
-    #[test]
-    fn ann_ss_trans_stack_ok() {
-        let input = "
-        data Alpha:. data Beta:.
-        data Gamma:. define [a, b, c] nocfoobar [c, b, a]:.
-        define [Alpha, Beta, Gamma] intadd [Gamma, Beta, Apha]: nocfoobar.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_err());
-    }
-
-    #[test]
-    fn uf_triple_add_ok() {
-        let input = "
-        define [a, a] nocadd [a]:.
-        define [a, a, a] tripleadd [a]: nocadd nocadd.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_ok());
-    }
-
-    #[test]
-    fn uf_triple_add_ok_spec() {
-        let input = "
-        data Alpha:. data Beta:. define [a, a] nocadd [a]:.
-        define [Alpha, Alpha, Alpha] tripleadd [Alpha]: nocadd nocadd.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_ok());
-    }
-
-    #[test]
-    fn uf_triple_add_ok_err1() {
-        let input = "
-        data Alpha:. data Beta:. define [a, a] nocadd [a]:.
-        define [Alpha, Alpha, Alpha] tripleadd [a]: nocadd nocadd.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_err());
-    }
-
-    #[test]
-    fn uf_triple_add_ok_err2() {
-        let input = "
-        data Alpha:. data Beta:. define [a, a] nocadd [a]:.
-        define [Alpha, Alpha, Beta] tripleadd [Alpha]: nocadd nocadd.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_err());
-    }
-
-    #[test]
-    fn of_triple1() {
-        let input = "
-        data Alpha:. data Beta:.
-        define [a] nocdup [a, a]:.
-        define [a] tripledup [a, a, a]: nocdup nocdup.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_ok());
-    }
-
-    #[test]
-    fn op_triple2() {
-        let input = "
-        data Alpha:. data Beta:.
-        define [a, a] nocadd [a]:.
-        define [a] nocdup [a, a]:.
-        define [a] tripledup [a, a, a]: nocdup nocdup nocadd nocdup.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_ok());
-    }
-
-    #[test]
-    fn int_add_uf_chain() {
-        let input = "
-        data Alpha: alpha. define [a, a] nocadd [a]:.
-        define [Alpha] alphainc [Alpha]: alpha nocadd.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_ok());
-    }
-
-    #[test]
-    fn int_add_datapoly() {
-        let input = "
-        data Alpha: alpha.
-        data Either a b: [a] left, [b] right.
-        define [] inteithertest [Either Alpha b]: alpha left.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_ok());
-    }
-
-    #[test]
-    fn int_add_datapoly_err() {
-        let input = "
-        data Alpha: alpha.
-        data Either a b: [a] left, [b] right.
-        define [] inteithertest [Either a Alpha]: alpha left.
-        ";
-        let module = parse(&input).unwrap();
-        assert!(Inference::new(&module).typecheck().is_err());
-    }
-
-    #[test]
-    fn case_maybe_nat() {
-        let input = "
-        data Nat: zero, [Nat] suc.
-        data Maybe a: nothing, [a] just.
-        define [Maybe Nat] incnatmaybe [Maybe Nat]: case { just { suc just }, nothing { nothing } }.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn case_maybe_nat_add_nop_expansion_err() {
-        let input = "
-        data Nat: zero, [Nat] suc.
-        data Maybe a: nothing, [a] just.
-        define [Nat, Nat] nocnatadd [Nat]:.
-        define [a] nocdup [a, a]:.
-        define [a, b, c] nocrot [c, a, b]:.
-        define [a, b] nocswap [b, a]:.
-        define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
-            case { just { nocswap nocdup nocdup nocrot nocnatadd just }, nothing { nothing } }.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn case_maybe_nat_add_nop_expansion() {
-        let input = "
-        data Nat: zero, [Nat] suc.
-        data Maybe a: nothing, [a] just.
-        define [Nat, Nat] nocnatadd [Nat]:.
-        define [a] nocdup [a, a]:.
-        define [a, b, c] nocrot [c, a, b]:.
-        define [a, b] nocswap [b, a]:.
-        define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
-            case { just { nocswap nocdup nocrot nocnatadd just }, nothing { nothing } }.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn case_maybe_nat_add_nop_expansion_arms_swapped() {
-        let input = "
-        data Nat: zero, [Nat] suc.
-        data Maybe a: nothing, [a] just.
-        define [Nat, Nat] nocnatadd [Nat]:.
-        define [a] nocdup [a, a]:.
-        define [a, b, c] nocrot [c, a, b]:.
-        define [a, b] nocswap [b, a]:.
-        define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
-            case { nothing { nothing }, just { nocswap nocdup nocrot nocnatadd just } }.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn case_maybe_nat_add_nop_expansion_wrong_constr() {
-        let input = "
-        data Nat: zero, [Nat] suc.
-        data Maybe a: nothing, [a] just.
-        data Either a b: [a] left, [b] right.
-        define [Nat, Nat] nocnatadd [Nat]:.
-        define [a] nocdup [a, a]:.
-        define [a, b, c] nocrot [c, a, b]:.
-        define [a, b] nocswap [b, a]:.
-        define [Maybe Nat, Nat] addnatmaybe [Maybe Nat, Nat]:
-            case { just { nocswap nocdup nocrot nocnatadd just }, left { nothing } }.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn case_totality() {
-        let input = "
-        data Expr:
-            int, float, string, add.
-        define [Expr] foobar [Int]:
-            case { int {1}, float {2}, string {3}, add {4}}.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn case_totality_err() {
-        let input = "
-        data Expr:
-            int, float, string, add.
-        define [Expr] foobar [Int]:
-            case { int {1}, float {2}, add {4}}.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn nop_unification_test() {
-        let input = "
-        define [] nop []:. define [a] foobar [a]: nop.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn nop_unification_test_err() {
-        let input = "
-        define [a] nocnop [a]:. define [] nop []: nocnop.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn nop_unification_test_err_poly() {
-        let input = "
-        define [a] nocnonop [a, a]:.
-        define [] nop []: nocnonop.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn nop_unification_test_err_mono() {
-        let input = "
-        data Alpha: alpha.
-        data Beta: beta.
-        define [Alpha] nocnonop [Beta]:.
-        define [] nop []: nocnonop.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn nop_unification_test_complex() {
-        let input = "
-        data Maybe a: [a] just, nothing.
-        data Nat: [Nat] suc, zero.
-        define [Maybe Nat] natnop [Maybe Nat]:.
-        define [Maybe Nat, Nat] foobar [Maybe Nat, Nat]: natnop.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn op_quote_test() {
-        let input = "
-        define [] foobar [[][Int, Int, Int]]: (1 2 3).
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn prelude_br_test() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [Bar, Foo, Foo, Foo] foobar [Foo, Foo, Foo, Bar]: br-3.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn prelude_br_test_err() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [Bar, Foo, Foo, Foo] foobar [Foo, Foo, Foo, Bar]: br-2.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn prelude_dg_test() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [Foo, Foo, Foo, Bar] foobar [Bar, Foo, Foo, Foo]: dg-3.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn prelude_dg_test_err() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [Foo, Foo, Foo, Bar] foobar [Bar, Foo, Foo, Foo]: dg-2.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn special_comp_test_dup() {
-        let input = "
-        data Foo: foo.
-        define [] foo [[][Foo, Foo]]: (foo) (dup) comp-0-1-1-2.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_comp_test_dup1() {
-        let input = "
-        data Foo: foo.
-        define [] foo [[a][Foo, a, a]]: (dup) (foo) comp-1-2-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn todo_nop_postfix_ann_vs_inf_bad() {
-        let input = "
-        data Foo: foo.
-        define [] foo [Foo]: dup pop foo.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn special_comp_test_err() {
-        let input = "
-        data Foo: foo.
-        define [] foo [[][Foo, Foo]]: (dup) (foo) comp-1-2-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn special_comp_test_quote() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [] foo [[][Bar, Foo]]: foo quote bar quote comp-0-1-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_comp_test_quote_err() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [] foo [[][Foo, Bar]]: foo quote bar quote comp-0-1-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn special_comp_test2() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [a] id [a]:.
-        define [] foo [[Foo][Bar, Foo]]: (id) (bar) comp-1-1-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_comp_test3() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [a] id [a]:.
-        define [] foo [[][Bar]]: (bar) (id) comp-0-1-1-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_comp_of() {
-        let input = "
-        define [] foo [[a][a, a, a]]: (dup) (dup) comp-1-2-1-2.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_comp_of2() {
-        let input = "
-        data Foo: foo.
-        data Bar: bar.
-        define [a] id [a]:.
-        define [] foo [[a][Bar, a, a]]: (dup) (bar) comp-1-2-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_comp_nei() {
-        let input = "
-        data Foo: foo.
-        define [a] id [a]:.
-        define [[a][a]] foo [[a][a]]: (id) comp-1-1-1-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_comp_nop1() {
-        let input = "
-        data Foo: foo.
-        define [a] id [a]:.
-        define [[a][a]] foobar [[a][Foo, a]]: (foo) comp-1-1-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_comp_nop2() {
-        let input = "
-        data Foo: foo.
-        define [a] id [a]:.
-        define [] foobar []: foo (id) comp-0-1-1-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn special_comp_nop3() {
-        let input = "
-        data Foo: foo.
-        define [a] id [a]:.
-        define [] foo []: (id) foobar comp-1-1-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn special_exec() {
-        let input = "
-        data Foo: foo.
-        define [] foo [Foo, Foo, Foo, Foo]: foo (dup dup dup) exec-1-4.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_exec_nei() {
-        let input = "
-        data Foo: foo.
-        define [Foo] foo [Foo, Foo, Foo, Foo]: (dup dup dup) exec-1-4.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn special_exec_nop() {
-        let input = "
-        data Foo: foo.
-        define [] foo [Foo, Foo, Foo, Foo]: foo exec-0-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_err());
-    }
-
-    #[test]
-    fn prelude_name_lookup_false_positive() {
-        let input = "
-        define [a] foo-1 [a]:.
-        define [b] foo [b]: foo-1.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn nat_list_sum_test() {
-        // stateful typechecker exec can infer that the poly is an optype
-        let input = "
-        data Nat:
-          zero,
-          [Nat] suc.
-
-        define [Nat, Nat] natsum [Nat]:
-          case { zero { },
-                 suc { natsum suc },
-               }.
-
-        data List a:
-          empty,
-          [a, List a] cons.
-
-        define [] nop []:.
-
-        define [[a][b], List a] map [List b]:
-          br-1
-          case { empty { pop empty },
-                 cons { br-2 dg-1 dup br-2 map br-2 exec-1-1 cons },
-               }.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
-    }
-
-    #[test]
-    fn nat_list_sum_test2() {
-        // stateful typechecker exec cannot infer that the poly is an optype
-        let input = "
-        data Nat:
-          zero,
-          [Nat] suc.
-
-        define [Nat, Nat] natsum [Nat]:
-          case { zero { },
-                 suc { natsum suc },
-               }.
-
-        data List a:
-          empty,
-          [a, List a] cons.
-
-        define [] nop []:.
-
-        define [[a][b], List a] map [List b]:
-          br-1
-          case { empty { pop empty },
-                 cons { dg-2 dup dg-2 br-1 exec-1-1 br-2 map dg-1 cons },
-               }.
-        ";
-        let module = parse(&input).unwrap();
-        let inferred = Inference::new(&module).typecheck();
-        println!("{:?}", inferred);
-        assert!(inferred.is_ok());
+    fn infer(&self, ops: &[Op]) -> Result<OpType, InferenceError> {
+        let mut acc = OpType::empty();
+        for op in ops {
+            let t = self.infer_op(op)?;
+            acc = self.chain(acc, t).map_err(|error| InferenceError {
+                error,
+                span: op.get_span().clone(),
+            })?;
+        }
+        Ok(acc)
     }
 }
