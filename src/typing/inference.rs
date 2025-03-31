@@ -26,8 +26,6 @@ pub enum InferenceErrorMessage {
     TypeOrderErrorElem { general: Type, concrete: Type },
     TypeOrderErrorOp { general: OpType, concrete: OpType },
     OpPrePostLenNeq { general: OpType, concrete: OpType },
-    UnusedLambdaName { name: String },
-    UnexpectedLambdaName { name: String },
 }
 
 type Subst = HashMap<String, Type>;
