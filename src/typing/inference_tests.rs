@@ -723,3 +723,16 @@ fn mut_rec_data() {
     println!("{:?}", inferred);
     assert!(inferred.is_ok());
 }
+
+#[test]
+fn occurs_check() {
+    let input = "
+            data List a: empty, [a, List a] cons.
+            define [a] occurscheck [List a]:
+                dup cons.
+            ";
+    let module = parse(&input).unwrap();
+    let inferred = Inference::new(&module).typecheck();
+    println!("{:?}", inferred);
+    assert!(inferred.is_ok());
+}

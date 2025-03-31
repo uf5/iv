@@ -26,6 +26,7 @@ pub enum InferenceErrorMessage {
     TypeOrderErrorElem { general: Type, concrete: Type },
     TypeOrderErrorOp { general: OpType, concrete: OpType },
     OpPrePostLenNeq { general: OpType, concrete: OpType },
+    OccursCheck { name: String },
 }
 
 type Subst = HashMap<String, Type>;
@@ -138,7 +139,8 @@ impl<'m> Inference<'m> {
                 continue;
             }
             let inf = self.infer(&op_def.body)?;
-            self.inf_vs_ann(inf, &op_def.ann)
+            let ann_inst = self.instantiate_op(op_def.ann.clone());
+            self.inf_vs_ann(inf, &ann_inst)
                 .map_err(|error| InferenceError {
                     error,
                     span: op_def.span.clone(),
@@ -187,6 +189,7 @@ impl<'m> Inference<'m> {
         l1: &[Type],
         l2: &[Type],
     ) -> Result<Subst, InferenceErrorMessage> {
+        println!("{l1:?} {l2:?}");
         zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (g, t)| {
             let s = self.unify_bw(&g.clone().apply(&s_acc), &t.clone().apply(&s_acc))?;
             Ok(compose(s_acc, s))
