@@ -27,6 +27,7 @@ pub enum InferenceErrorMessage {
     TypeOrderErrorOp { general: OpType, concrete: OpType },
     OpPrePostLenNeq { general: OpType, concrete: OpType },
     OccursCheck { name: String },
+    ListMGULengthDifferent,
 }
 
 type Subst = HashMap<String, Type>;
@@ -40,6 +41,7 @@ fn compose(s1: Subst, s2: Subst) -> Subst {
 trait Typeable {
     fn ftv(&self) -> HashSet<String>;
     fn apply(self, subst: &Subst) -> Self;
+    fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage>;
 }
 
 impl Typeable for Type {
@@ -67,6 +69,12 @@ impl Typeable for Type {
             Type::App(t1, t2) => Type::App(Box::new(t1.apply(subst)), Box::new(t2.apply(subst))),
         }
     }
+
+    fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
+        match (t1, t2) {
+            (_, _) => todo!(),
+        }
+    }
 }
 
 impl Typeable for OpType {
@@ -82,6 +90,37 @@ impl Typeable for OpType {
         let pre = self.pre.into_iter().map(|t| t.apply(subst)).collect();
         let post = self.post.into_iter().map(|t| t.apply(subst)).collect();
         OpType { pre, post }
+    }
+
+    fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
+        todo!()
+    }
+}
+
+impl<T> Typeable for Vec<T>
+where
+    T: Typeable + Clone,
+{
+    fn ftv(&self) -> HashSet<String> {
+        self.into_iter().flat_map(Typeable::ftv).collect()
+    }
+
+    fn apply(self, subst: &Subst) -> Self {
+        self.into_iter().map(|x| x.apply(subst)).collect()
+    }
+
+    fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
+        if t1.len() != t2.len() {
+            return Err(InferenceErrorMessage::ListMGULengthDifferent);
+        }
+        let mut s = Subst::new();
+        for (x, y) in zip(t1.into_iter(), t2.into_iter()) {
+            let x = x.to_owned().apply(&s);
+            let y = y.to_owned().apply(&s);
+            let ss = Typeable::mgu(&x, &y)?;
+            s = compose(s, ss);
+        }
+        Ok(s)
     }
 }
 
