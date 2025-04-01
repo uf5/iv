@@ -72,7 +72,25 @@ impl Typeable for Type {
 
     fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
         match (t1, t2) {
-            (_, _) => todo!(),
+            (Type::Mono(name1), Type::Mono(name2)) if name1 == name2 => Ok(Subst::new()),
+            (Type::Poly(v), t) | (t, Type::Poly(v)) => {
+                if t.ftv().contains(v) {
+                    return Err(InferenceErrorMessage::OccursCheck { name: v.to_owned() });
+                }
+                Ok(HashMap::from([(v.to_owned(), t.to_owned())]))
+            }
+            (Type::App(lhs1, rhs1), Type::App(lhs2, rhs2)) => {
+                let s1 = Type::mgu(lhs1, lhs2)?;
+                let rhs1 = rhs1.to_owned().apply(&s1);
+                let rhs2 = rhs2.to_owned().apply(&s1);
+                let s2 = Type::mgu(&rhs1, &rhs2)?;
+                Ok(compose(s1, s2))
+            }
+            (Type::Op(o1), Type::Op(o2)) => Typeable::mgu(o1, o2),
+            (_, _) => Err(InferenceErrorMessage::UnificationError {
+                t1: t1.clone(),
+                t2: t2.clone(),
+            }),
         }
     }
 }
@@ -93,7 +111,11 @@ impl Typeable for OpType {
     }
 
     fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
-        todo!()
+        let s1 = Typeable::mgu(&t1.pre, &t2.pre)?;
+        let t1 = t1.pre.to_owned().apply(&s1);
+        let t2 = t2.pre.to_owned().apply(&s1);
+        let s2 = Typeable::mgu(&t1, &t2)?;
+        Ok(compose(s1, s2))
     }
 }
 
