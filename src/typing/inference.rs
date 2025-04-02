@@ -74,9 +74,9 @@ impl Typeable for Type {
         match (t1, t2) {
             (Type::Mono(name1), Type::Mono(name2)) if name1 == name2 => Ok(Subst::new()),
             (Type::Poly(v), t) | (t, Type::Poly(v)) => {
-                if t.ftv().contains(v) {
-                    return Err(InferenceErrorMessage::OccursCheck { name: v.to_owned() });
-                }
+                // if t.ftv().contains(v) {
+                //     return Err(InferenceErrorMessage::OccursCheck { name: v.to_owned() });
+                // }
                 Ok(HashMap::from([(v.to_owned(), t.to_owned())]))
             }
             (Type::App(lhs1, rhs1), Type::App(lhs2, rhs2)) => {
@@ -211,9 +211,12 @@ impl<'m> Inference<'m> {
     }
 
     fn inf_vs_ann(&self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
+        println!("checking inf against ann...");
+        println!("inf: {inf:?}");
+        println!("ann: {ann:?}");
         // augment stacks toward the annotation
         let inf = self.augment_op_ow(inf, ann);
-        let s = self.unify_op_ow(&inf, ann)?;
+        let s = OpType::mgu(&inf, ann)?;
         // ann matches the inf when all subs associated with ftv of annotation are poly
         for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
             match v {
@@ -238,87 +241,6 @@ impl<'m> Inference<'m> {
     fn instantiate_op(&self, op: OpType) -> OpType {
         let new_var_subst = op.ftv().into_iter().map(|v| (v, self.gen_name())).collect();
         op.apply(&new_var_subst)
-    }
-
-    fn unify_list_bw(
-        &self,
-        s: Subst,
-        l1: &[Type],
-        l2: &[Type],
-    ) -> Result<Subst, InferenceErrorMessage> {
-        println!("{l1:?} {l2:?}");
-        zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (g, t)| {
-            let s = self.unify_bw(&g.apply(&s_acc), &t.apply(&s_acc))?;
-            Ok(compose(s_acc, s))
-        })
-    }
-
-    fn unify_list_ow(
-        &self,
-        s: Subst,
-        general: &[Type],
-        concrete: &[Type],
-    ) -> Result<Subst, InferenceErrorMessage> {
-        zip(general.iter(), concrete.iter()).try_fold(s, |s_acc, (g, t)| {
-            let s = self.unify_ow(&g.apply(&s_acc), &t.apply(&s_acc))?;
-            Ok(compose(s_acc, s))
-        })
-    }
-
-    fn unify_op_bw(&self, o1: &OpType, o2: &OpType) -> Result<Subst, InferenceErrorMessage> {
-        self.unify_op_ow(o1, o2)
-            .or_else(|_| self.unify_op_ow(o2, o1))
-    }
-
-    fn unify_op_ow(
-        &self,
-        general: &OpType,
-        concrete: &OpType,
-    ) -> Result<Subst, InferenceErrorMessage> {
-        // this augmented op type gets deleted after exiting this funciton's
-        // scope.
-        // in theory it would be better to replace the general optype
-        // with the augmented one, but i dont think this will be an
-        // issue since [][Foo] <= [a][Foo, a].
-        // in addition, the formalized type inference rules includes the
-        // augmentation rule, which, roughly speaking, does not change the type.
-        let aug_general = self.augment_op_ow(general.clone(), concrete);
-        // op type pre post stacks length equality check
-        if aug_general.pre.len() != concrete.pre.len()
-            || aug_general.post.len() != concrete.post.len()
-        {
-            return Err(InferenceErrorMessage::OpPrePostLenNeq {
-                general: aug_general.clone(),
-                concrete: concrete.clone(),
-            });
-        }
-        // unify stacks
-        let s1 = self.unify_list_ow(Subst::new(), &aug_general.pre, &concrete.pre)?;
-        self.unify_list_ow(s1, &aug_general.post, &concrete.post)
-    }
-
-    fn unify_bw(&self, general: &Type, concrete: &Type) -> Result<Subst, InferenceErrorMessage> {
-        self.unify_ow(general, concrete)
-            .or_else(|_| self.unify_ow(concrete, general))
-    }
-
-    /// one way type unification: general <= concrete
-    fn unify_ow(&self, general: &Type, concrete: &Type) -> Result<Subst, InferenceErrorMessage> {
-        match (general, concrete) {
-            (Type::Mono(m1), Type::Mono(m2)) if m1 == m2 => Ok(Subst::new()),
-            (Type::Poly(p1), Type::Poly(p2)) if p1 == p2 => Ok(Subst::new()),
-            (Type::Poly(v), t) => Ok(once((v.clone(), t.clone())).collect()),
-            (Type::App(f1, x1), Type::App(f2, x2)) => {
-                let s1 = self.unify_ow(f1, f2)?;
-                let s2 = self.unify_ow(&x1.apply(&s1), &x2.apply(&s1))?;
-                Ok(compose(s1, s2))
-            }
-            (Type::Op(o1), Type::Op(o2)) => self.unify_op_ow(o1, o2),
-            (general, concrete) => Err(InferenceErrorMessage::TypeOrderErrorElem {
-                general: general.clone(),
-                concrete: concrete.clone(),
-            }),
-        }
     }
 
     /// Augments the first argument's pre and post stacks towards the target
@@ -421,7 +343,8 @@ impl<'m> Inference<'m> {
             pre: gamma,
             post: delta,
         } = ot2;
-        let s = self.unify_list_bw(Subst::new(), &beta, &gamma)?;
+        let l = usize::min(beta.len(), gamma.len());
+        let s = Vec::mgu(&beta[..l].into(), &gamma[..l].into())?;
         if beta.len() >= gamma.len() {
             // overflow chain
             let beta_skip_gamma = beta.into_iter().skip(gamma.len());
@@ -488,12 +411,10 @@ impl<'m> Inference<'m> {
                 for arm in arms {
                     let mut arm_ot = self.infer_case_arm(arm)?;
                     (head_ot, arm_ot) = self.augment_op_bw(head_ot, arm_ot);
-                    let s =
-                        self.unify_op_bw(&head_ot, &arm_ot)
-                            .map_err(|error| InferenceError {
-                                error,
-                                span: span.to_owned(),
-                            })?;
+                    let s = OpType::mgu(&head_ot, &arm_ot).map_err(|error| InferenceError {
+                        error,
+                        span: span.to_owned(),
+                    })?;
                     head_ot = head_ot.apply(&s);
                 }
 
