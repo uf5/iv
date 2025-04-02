@@ -73,10 +73,11 @@ impl Typeable for Type {
     fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
         match (t1, t2) {
             (Type::Mono(name1), Type::Mono(name2)) if name1 == name2 => Ok(Subst::new()),
+            (Type::Poly(name1), Type::Poly(name2)) if name1 == name2 => Ok(Subst::new()),
             (Type::Poly(v), t) | (t, Type::Poly(v)) => {
-                // if t.ftv().contains(v) {
-                //     return Err(InferenceErrorMessage::OccursCheck { name: v.to_owned() });
-                // }
+                if t.ftv().contains(v) {
+                    return Err(InferenceErrorMessage::OccursCheck { name: v.to_owned() });
+                }
                 Ok(HashMap::from([(v.to_owned(), t.to_owned())]))
             }
             (Type::App(lhs1, rhs1), Type::App(lhs2, rhs2)) => {
@@ -211,13 +212,9 @@ impl<'m> Inference<'m> {
     }
 
     fn inf_vs_ann(&self, inf: OpType, ann: &OpType) -> Result<(), InferenceErrorMessage> {
-        println!("checking inf against ann...");
-        println!("inf: {inf:?}");
-        println!("ann: {ann:?}");
         // augment stacks toward the annotation
         let inf = self.augment_op_ow(inf, ann);
         let s = OpType::mgu(&inf, ann)?;
-        println!("s: {s:?}");
         // ann matches the inf when all subs associated with ftv of annotation are poly
         for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
             match v {

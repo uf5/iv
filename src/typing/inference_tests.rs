@@ -734,5 +734,5 @@ fn occurs_check() {
     let module = parse(&input).unwrap();
     let inferred = Inference::new(&module).typecheck();
     println!("{:?}", inferred);
-    assert!(inferred.is_ok());
+    assert!(inferred.is_err());
 }
