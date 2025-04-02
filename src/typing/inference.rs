@@ -112,8 +112,8 @@ impl Typeable for OpType {
 
     fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
         let s1 = Typeable::mgu(&t1.pre, &t2.pre)?;
-        let t1 = t1.pre.apply(&s1);
-        let t2 = t2.pre.apply(&s1);
+        let t1 = t1.post.apply(&s1);
+        let t2 = t2.post.apply(&s1);
         let s2 = Typeable::mgu(&t1, &t2)?;
         Ok(compose(s1, s2))
     }
@@ -217,6 +217,7 @@ impl<'m> Inference<'m> {
         // augment stacks toward the annotation
         let inf = self.augment_op_ow(inf, ann);
         let s = OpType::mgu(&inf, ann)?;
+        println!("s: {s:?}");
         // ann matches the inf when all subs associated with ftv of annotation are poly
         for v in ann.ftv().iter().filter_map(|t| s.get(t)) {
             match v {
