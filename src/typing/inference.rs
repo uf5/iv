@@ -40,7 +40,7 @@ fn compose(s1: Subst, s2: Subst) -> Subst {
 
 trait Typeable {
     fn ftv(&self) -> HashSet<String>;
-    fn apply(self, subst: &Subst) -> Self;
+    fn apply(&self, subst: &Subst) -> Self;
     fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage>;
 }
 
@@ -58,12 +58,12 @@ impl Typeable for Type {
         }
     }
 
-    fn apply(self, subst: &Subst) -> Self {
+    fn apply(&self, subst: &Subst) -> Self {
         match self {
             Type::Mono(_) => self.clone(),
-            Type::Poly(v) => match subst.get(&v) {
+            Type::Poly(v) => match subst.get(v) {
                 Some(t) => t.clone(),
-                None => Type::Poly(v),
+                None => Type::Poly(v.to_owned()),
             },
             Type::Op(op_type) => Type::Op(op_type.apply(subst)),
             Type::App(t1, t2) => Type::App(Box::new(t1.apply(subst)), Box::new(t2.apply(subst))),
@@ -81,8 +81,8 @@ impl Typeable for Type {
             }
             (Type::App(lhs1, rhs1), Type::App(lhs2, rhs2)) => {
                 let s1 = Type::mgu(lhs1, lhs2)?;
-                let rhs1 = rhs1.to_owned().apply(&s1);
-                let rhs2 = rhs2.to_owned().apply(&s1);
+                let rhs1 = rhs1.apply(&s1);
+                let rhs2 = rhs2.apply(&s1);
                 let s2 = Type::mgu(&rhs1, &rhs2)?;
                 Ok(compose(s1, s2))
             }
@@ -104,16 +104,16 @@ impl Typeable for OpType {
             .collect()
     }
 
-    fn apply(self, subst: &Subst) -> Self {
-        let pre = self.pre.into_iter().map(|t| t.apply(subst)).collect();
-        let post = self.post.into_iter().map(|t| t.apply(subst)).collect();
+    fn apply(&self, subst: &Subst) -> Self {
+        let pre = self.pre.iter().map(|t| t.apply(subst)).collect();
+        let post = self.post.iter().map(|t| t.apply(subst)).collect();
         OpType { pre, post }
     }
 
     fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
         let s1 = Typeable::mgu(&t1.pre, &t2.pre)?;
-        let t1 = t1.pre.to_owned().apply(&s1);
-        let t2 = t2.pre.to_owned().apply(&s1);
+        let t1 = t1.pre.apply(&s1);
+        let t2 = t2.pre.apply(&s1);
         let s2 = Typeable::mgu(&t1, &t2)?;
         Ok(compose(s1, s2))
     }
@@ -127,8 +127,8 @@ where
         self.into_iter().flat_map(Typeable::ftv).collect()
     }
 
-    fn apply(self, subst: &Subst) -> Self {
-        self.into_iter().map(|x| x.apply(subst)).collect()
+    fn apply(&self, subst: &Subst) -> Self {
+        self.iter().map(|x| x.apply(subst)).collect()
     }
 
     fn mgu(t1: &Self, t2: &Self) -> Result<Subst, InferenceErrorMessage> {
@@ -137,8 +137,8 @@ where
         }
         let mut s = Subst::new();
         for (x, y) in zip(t1.into_iter(), t2.into_iter()) {
-            let x = x.to_owned().apply(&s);
-            let y = y.to_owned().apply(&s);
+            let x = x.apply(&s);
+            let y = y.apply(&s);
             let ss = Typeable::mgu(&x, &y)?;
             s = compose(s, ss);
         }
@@ -236,11 +236,7 @@ impl<'m> Inference<'m> {
     }
 
     fn instantiate_op(&self, op: OpType) -> OpType {
-        let new_var_subst = op
-            .ftv()
-            .iter()
-            .map(|v| (v.to_owned(), self.gen_name()))
-            .collect();
+        let new_var_subst = op.ftv().into_iter().map(|v| (v, self.gen_name())).collect();
         op.apply(&new_var_subst)
     }
 
@@ -252,7 +248,7 @@ impl<'m> Inference<'m> {
     ) -> Result<Subst, InferenceErrorMessage> {
         println!("{l1:?} {l2:?}");
         zip(l1.iter(), l2.iter()).try_fold(s, |s_acc, (g, t)| {
-            let s = self.unify_bw(&g.clone().apply(&s_acc), &t.clone().apply(&s_acc))?;
+            let s = self.unify_bw(&g.apply(&s_acc), &t.apply(&s_acc))?;
             Ok(compose(s_acc, s))
         })
     }
@@ -264,7 +260,7 @@ impl<'m> Inference<'m> {
         concrete: &[Type],
     ) -> Result<Subst, InferenceErrorMessage> {
         zip(general.iter(), concrete.iter()).try_fold(s, |s_acc, (g, t)| {
-            let s = self.unify_ow(&g.clone().apply(&s_acc), &t.clone().apply(&s_acc))?;
+            let s = self.unify_ow(&g.apply(&s_acc), &t.apply(&s_acc))?;
             Ok(compose(s_acc, s))
         })
     }
@@ -314,7 +310,7 @@ impl<'m> Inference<'m> {
             (Type::Poly(v), t) => Ok(once((v.clone(), t.clone())).collect()),
             (Type::App(f1, x1), Type::App(f2, x2)) => {
                 let s1 = self.unify_ow(f1, f2)?;
-                let s2 = self.unify_ow(&x1.clone().apply(&s1), &x2.clone().apply(&s1))?;
+                let s2 = self.unify_ow(&x1.apply(&s1), &x2.apply(&s1))?;
                 Ok(compose(s1, s2))
             }
             (Type::Op(o1), Type::Op(o2)) => self.unify_op_ow(o1, o2),
