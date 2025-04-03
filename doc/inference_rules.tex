@@ -1,0 +1,252 @@
+\documentclass{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{bussproofs}
+\usepackage{xcolor}
+\usepackage{graphicx}
+
+\newcommand{\op}[3]{[#1] \texttt{#2} [#3]}
+
+\newenvironment{scprooftree}[1]%
+{\gdef\scalefactor{#1}
+\begin{center}\proofSkipAmount \leavevmode}%
+  {\scalebox{\scalefactor}{\DisplayProof}\proofSkipAmount
+\end{center} }
+
+\title{IV Type System Inference Rules}
+
+\begin{document}
+
+\maketitle
+
+\section*{Language}
+
+\subsection*{Declarations}
+
+\subsubsection*{Data declaration}
+The data types are represented by Algebraic Data Types (ADT) in the language.
+\begin{verbatim}
+data Either a b:
+  [a] left,
+  [b] right.
+\end{verbatim}
+If a constructor does not take any types its input parameters can be omitted.
+\begin{verbatim}
+data Maybe a:
+  nothing,
+  [a] just.
+\end{verbatim}
+ADT's can be recursive.
+\begin{verbatim}
+data Nat:
+  zero,
+  [Nat] suc.
+\end{verbatim}
+
+\subsection*{Operator declaration}
+The operators are represented by a sequence of operators. All operator
+definitions must have a type annotation.
+\begin{verbatim}
+define [Nat, Nat] add [Nat]:
+  case { zero { }, suc { add suc } }.
+
+define [Nat] addThree [Nat]:
+  zero suc suc suc add.
+\end{verbatim}
+An operator's body can be empty
+\begin{verbatim}
+define [] nop []:.
+\end{verbatim}
+
+\subsection*{Standard operations}
+
+\subsubsection*{Non-parametric}
+\begin{itemize}
+  \item \texttt{pop} \\
+    Delete the top element.
+  \item \texttt{dup} \\
+    Duplicate the top element.
+\end{itemize}
+
+\subsubsection*{Parametric}
+Parameter \texttt{n} is a natural number without zero ($\mathbb{N}
+\setminus \{ 0 \}$).
+\begin{itemize}
+  \item \texttt{br-n} \\
+    Move the topmost element to be the n-th element.
+  \item \texttt{dg-n} \\
+    Move the n-th element to the top of the stack.
+\end{itemize}
+
+\section*{Operator type system}
+
+\subsection*{Environment}
+Environment is constant throughout the type checking process. It
+contains operator definitions and data definitions.
+\begin{equation*}
+  \Gamma = (\text{opDefs}, \text{dataDefs})
+\end{equation*}
+Operator definitions consist of standard operators, user-defined
+operators, user-defined data constructors.
+\begin{equation*}
+  \text{opDefs} = \text{stdOps} \cup \text{userOps} \cup \text{userDataConstrs}
+\end{equation*}
+Data definitions consist of user-defined data types (Algebraic Data Types).
+\begin{equation*}
+  \text{dataDefs} = \text{userDatas}
+\end{equation*}
+
+\subsection*{Operator Type separation}
+\begin{itemize}
+  \item \textbf{Type} - represents the type of a value stored on the stack.
+  \item \textbf{Operator Type} - represents the type of an element of
+    an operator body.
+\end{itemize}
+
+\subsection*{Type definition}
+A type can be one of the following
+\begin{itemize}
+  \item Monomorphic type, e.g., Int, Bool, Nat.
+  \item Polymorphic type (type variable), e.g., a, b, c.
+  \item Type application, e.g. Maybe a, Either a b.
+\end{itemize}
+Definition in Haskell
+\begin{verbatim}
+data Type
+  = Mono String
+  | Poly String
+  | App Type Type
+\end{verbatim}
+
+\subsection*{Operator Type definition}
+An operator has only one constructor that has the following fields
+\begin{itemize}
+  \item pre - types of elements that the operator takes as input arguments.
+  \item post - types of elements that the operator returns as output arguments.
+\end{itemize}
+Definition in Haskell
+\begin{verbatim}
+data OpType
+  = OpType {
+    pre :: [Type],
+    post :: [Type]
+  }
+\end{verbatim}
+
+\subsection*{Notation}
+\begin{itemize}
+  \item ``$\op{\textit{pre}}{}{\textit{post}}$'' represents an
+    operator type. Where \textit{pre} and \textit{post} represent the
+    input and output parameters.
+  \item ``$\{ \text{a} \mapsto \text{Foo} \}
+    \op{\textit{pre}}{}{\textit{post}}$'' represents an application
+    of a substitution ``$\{ \text{a} \mapsto \text{Foo} \}$'' on an
+    operator type ``$\op{\textit{pre}}{}{\textit{post}}$''
+  \item ``$\alpha \cdot \beta$'' represents list concatenation.
+  \item An operator(s) between the stack descriptions is a shorthand,
+    e.g., writing $\op{a, b}{foo bar}{c, d}$ is equivalent to
+    $\texttt{foo bar} : \op{a, b}{}{c, d}$.
+  \item The leftmost element in the stack type description is the
+    most recently pushed,\\
+    e.g., $\op{}{foo bar baz}{\text{Baz}, \text{Bar}, \text{Foo}}$.
+  \item Greek letters denote lists of types, while Latin letters
+    denote single types.
+\end{itemize}
+
+\subsection*{Type inference rules}
+\subsubsection*{Specialization Rule (Operator Type)}
+An operator type is considered a specific of a general operator type
+if there exists a substitution that turns the general type into the
+specific type.
+\begin{prooftree}
+  \AxiomC{$\op{\alpha}{}{\beta} = \{ a' \mapsto a \} \op{\alpha'}{}{\beta'}$}
+  \UnaryInfC{$\op{\alpha}{}{\beta} \sqsubseteq \op{\alpha'}{}{\beta'}$}
+\end{prooftree}
+
+\subsubsection*{Empty rule}
+Allows to use an empty sequence of operators, that does not take any
+input arguments and does not return any output arguments.
+\begin{prooftree}
+  \AxiomC{}
+  \UnaryInfC{$\Gamma \vdash \op{}{}{}$}
+\end{prooftree}
+
+\subsubsection*{Name rule}
+Allows to use previously defined operators.
+\begin{prooftree}
+  \AxiomC{$\op{\alpha}{op}{\beta} \in \Gamma$}
+  \UnaryInfC{$\Gamma \vdash \op{\alpha}{op}{\beta}$}
+\end{prooftree}
+
+\subsubsection*{Specialization and augmentation rule}
+Allows specialization and augmentation of operator types of operators.
+\begin{itemize}
+  \item (Specialization) allows to use $\op{a}{id}{a}$ in place of
+    $\op{\text{Nat}}{inc}{\text{Nat}}$
+  \item (Augmentation) allows to use \op{\text{Nat}}{inc}{\text{Nat}}
+    in place of \op{\text{Nat}, \text{Nat}}{inc2}{\text{Nat}, \text{Nat}}
+\end{itemize}
+\begin{prooftree}
+  \AxiomC{$\Gamma \vdash \op{\alpha'}{x}{\beta'}$}
+  \AxiomC{$\op{\alpha}{}{\beta} \sqsubseteq \op{\alpha'}{}{\beta'}$}
+  \BinaryInfC{$\Gamma \vdash \op{\alpha \cdot \gamma}{x}{\beta \cdot \gamma}$}
+\end{prooftree}
+
+\subsubsection*{Chain rule}
+Allows to compose operators. To be chained, LHS post should be equal
+(i.e., equal length and elements, including type variables) to the RHS pre.
+\begin{prooftree}
+  \AxiomC{$\Gamma \vdash \op{\alpha}{x}{\beta}$}
+  \AxiomC{$\Gamma \vdash \op{\psi}{y}{\omega}$}
+  \AxiomC{$\beta = \psi$}
+  \TrinaryInfC{$\Gamma \vdash \op{\alpha}{x y}{\omega}$}
+\end{prooftree}
+
+\subsubsection*{Case rule}
+Operator type of the whole case expression must be a specific of all
+case arms. Pattern matching should be total on all constructors of
+the data type.
+\begin{prooftree}
+  \AxiomC{$\{ \texttt{constr1}, \ldots \} = \text{constrs} ( t )$}
+  \AxiomC{$\Gamma \vdash \op{t, \alpha'}{constr$^{-1}$ body}{\beta'}$}
+  \AxiomC{$\op{t, \alpha}{}{\beta} \sqsubseteq \op{t, \alpha'}{}{\beta'}$}
+  \AxiomC{$\ldots$}
+  \QuaternaryInfC{$\Gamma \vdash \op{t,
+  \alpha}{case\{constr1\{body1\},...\}}{\beta}$}
+\end{prooftree}
+A case arm operator type is destructor $\texttt{constr$^{-1}$}$
+chained with the body. \\
+Where $\texttt{constr$^{-1}$}$ is the destructor of a constructor
+$\texttt{constr}$, i.e., Operator Type of $\texttt{constr}$ with pre
+and post swapped.
+\begin{prooftree}
+  \AxiomC{$\Gamma \vdash \op{\alpha}{constr}{t}$}
+  \UnaryInfC{$\Gamma \vdash \op{t}{constr$^{-1}$}{\alpha}$}
+\end{prooftree}
+
+\subsubsection*{Stack operations}
+Dup
+\begin{prooftree}
+  \AxiomC{}
+  \UnaryInfC{$\Gamma \vdash \op{a}{dup}{a, a}$}
+\end{prooftree}
+Pop
+\begin{prooftree}
+  \AxiomC{}
+  \UnaryInfC{$\Gamma \vdash \op{a}{pop}{}$}
+\end{prooftree}
+Bury
+\begin{prooftree}
+  \AxiomC{$||\alpha|| = n$}
+  \UnaryInfC{$\Gamma \vdash \op{b, \alpha}{br-n}{\alpha, b}$}
+\end{prooftree}
+Dig
+\begin{prooftree}
+  \AxiomC{$||\alpha|| = n$}
+  \UnaryInfC{$\Gamma \vdash \op{\alpha, b}{dg-n}{b, \alpha}$}
+\end{prooftree}
+
+\end{document}
